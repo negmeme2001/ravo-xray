@@ -72,3 +72,12 @@ def test_redis_error_falls_back_to_off(monkeypatch):
     assert vector == [7.0]
     assert info["cache"] == "off"
     assert isinstance(info["ms"], float)
+
+def test_redis_credentials_accept_vercel_marketplace_names(monkeypatch):
+    from ravo_core import embed_cache
+
+    for name in ("UPSTASH_REDIS_REST_URL", "UPSTASH_REDIS_REST_TOKEN"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("KV_REST_API_URL", "https://example.upstash.io")
+    monkeypatch.setenv("KV_REST_API_TOKEN", "token")
+    assert embed_cache._redis_credentials() == ("https://example.upstash.io", "token")

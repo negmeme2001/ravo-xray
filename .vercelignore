@@ -1,0 +1,7 @@
+.agents
+.claude
+skills-lock.json
+.pytest_cache
+.venv
+tests
+seed

@@ -36,11 +36,17 @@ def decode_vector(s: str) -> list[float]:
     return array("f", base64.b64decode(s)).tolist()
 
 
+def _redis_credentials() -> tuple[str | None, str | None]:
+    """Upstash's own names first, then the KV_* names the Vercel Marketplace injects."""
+    url = os.environ.get("UPSTASH_REDIS_REST_URL") or os.environ.get("KV_REST_API_URL")
+    token = os.environ.get("UPSTASH_REDIS_REST_TOKEN") or os.environ.get("KV_REST_API_TOKEN")
+    return url, token
+
+
 def get_redis() -> Redis | None:
     global _redis
     if _redis is None:
-        url = os.environ.get("UPSTASH_REDIS_REST_URL")
-        token = os.environ.get("UPSTASH_REDIS_REST_TOKEN")
+        url, token = _redis_credentials()
         if url and token:
             _redis = Redis(url=url, token=token)
     return _redis

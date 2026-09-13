@@ -5,3 +5,7 @@ __pycache__/
 seed/catalog.jsonl
 .env*
 !.env.example
+.agents/
+.claude/
+skills-lock.json
+.pytest_cache/
