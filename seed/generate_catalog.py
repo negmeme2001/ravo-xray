@@ -4,10 +4,14 @@ actually mean something. Ravo's real catalogs are retailer product feeds
 (ingested via the mapping + ai-integration services); this stands in for one.
 
 Writes catalog.jsonl — one product per line.
+
+Usage:
+    uv run python -m seed.generate_catalog       # writes seed/catalog.jsonl
 """
 
 import json
 import random
+from pathlib import Path
 
 random.seed(42)
 
@@ -86,7 +90,8 @@ def make_catalog(target: int = 1500) -> list[dict]:
 
 if __name__ == "__main__":
     rows = make_catalog()
-    with open("catalog.jsonl", "w") as f:
+    out_path = Path(__file__).parent / "catalog.jsonl"
+    with open(out_path, "w") as f:
         for r in rows:
             f.write(json.dumps(r) + "\n")
     in_stock = sum(1 for r in rows if r["stock"] > 0)

@@ -10,18 +10,19 @@ decides what "similar" means. CHUNK_SIZE / CHUNK_OVERLAP are the knobs — chang
 them and re-run ingest + benchmark to see retrieval quality move.
 
 Usage:
-    uv run python ingest_pdfs.py                            # all PDFs in docs/
-    uv run python ingest_pdfs.py docs/a.pdf docs/b.pdf      # specific files
-    uv run python ingest_pdfs.py --chunk-size 100 --overlap 20 --m 16 --efc 200
+    uv run python -m seed.ingest_pdfs                        # all PDFs in seed/docs/
+    uv run python -m seed.ingest_pdfs docs/a.pdf docs/b.pdf  # specific files
+    uv run python -m seed.ingest_pdfs --chunk-size 100 --overlap 20 --m 16 --efc 200
 """
 
 import argparse
 import glob
 import json
+from pathlib import Path
 
 import pdfplumber
 
-from db import connect, embed_batch, EMBED_DIM, timer
+from ravo_core.db import connect, embed_batch, EMBED_DIM, timer
 
 
 def extract_text(path: str) -> str:
@@ -133,7 +134,7 @@ if __name__ == "__main__":
     ap.add_argument("--efc", type=int, default=64, help="ef_construction")
     args = ap.parse_args()
 
-    paths = args.pdfs or sorted(glob.glob("docs/*.pdf"))
+    paths = args.pdfs or sorted(glob.glob(str(Path(__file__).parent / "docs" / "*.pdf")))
     if not paths:
-        raise SystemExit("No PDFs found. Run `uv run python generate_docs.py` first.")
+        raise SystemExit("No PDFs found. Run `uv run python -m seed.generate_docs` first.")
     main(paths, args.chunk_size, args.overlap, args.m, args.efc)

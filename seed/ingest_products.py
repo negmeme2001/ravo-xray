@@ -5,22 +5,31 @@ This is the miniature of Ravo's ingestion pipeline (§10 of onboarding):
 external feed -> standardized JSON -> embed (text-embedding-3-small) -> products + products_embedding.
 
 Usage:
-    uv run python ingest.py                 # defaults: m=16, ef_construction=64
-    uv run python ingest.py --m 16 --efc 200
+    uv run python -m seed.ingest_products                  # defaults: m=16, ef_construction=64, full text
+    uv run python -m seed.ingest_products --m 16 --efc 200 --text-mode name
 """
 
 import argparse
 import json
+from pathlib import Path
 
-from db import connect, embed_batch, product_text, EMBED_DIM, timer
+from ravo_core.db import connect, embed_batch, EMBED_DIM, timer
 
 
-def load_rows(path="catalog.jsonl") -> list[dict]:
+def product_text(p: dict, mode: str = "full") -> str:
+    """Render a product row for embedding."""
+    if mode == "name":
+        return p["name"]
+    return f"{p['name']} | {p['category']} | {p['description']}"
+
+
+def load_rows(path: str | None = None) -> list[dict]:
+    path = path or str(Path(__file__).parent / "catalog.jsonl")
     with open(path) as f:
         return [json.loads(line) for line in f]
 
 
-def main(m: int, efc: int):
+def main(m: int, efc: int, mode: str = "full"):
     rows = load_rows()
     print(f"Loaded {len(rows)} products from catalog.jsonl")
 
@@ -49,7 +58,7 @@ def main(m: int, efc: int):
         embeddings = []
         for i in range(0, len(rows), 200):
             chunk = rows[i:i + 200]
-            embeddings.extend(embed_batch([product_text(p) for p in chunk]))
+            embeddings.extend(embed_batch([product_text(p, mode) for p in chunk]))
             print(f"  embedded {min(i + 200, len(rows))}/{len(rows)}")
     print(f"Embedding done in {t_embed.ms/1000:.1f}s")
 
@@ -86,5 +95,7 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--m", type=int, default=16)
     ap.add_argument("--efc", type=int, default=64, help="ef_construction")
+    ap.add_argument("--text-mode", choices=["full", "name"], default="full",
+                    help="which product text to embed (default: full)")
     args = ap.parse_args()
-    main(args.m, args.efc)
+    main(args.m, args.efc, args.text_mode)

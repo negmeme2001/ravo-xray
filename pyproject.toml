@@ -1,0 +1,26 @@
+[project]
+name = "ravo-xray"
+version = "0.1.0"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi",
+    "psycopg[binary]",
+    "pgvector",
+    "openai",
+    "upstash-redis",
+]
+
+[dependency-groups]
+dev = [
+    "pytest",
+    "httpx",
+    "pdfplumber",
+    "fpdf2",
+]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
+markers = [
+    "db: needs a real Postgres via DATABASE_URL",
+]

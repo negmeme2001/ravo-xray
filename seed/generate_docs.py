@@ -6,7 +6,7 @@ In Ravo, "collections" are real documents like these — retailer guides, menus,
 store FAQs — pulled in through the catalog pipeline and stored in the
 `collections_embedding` table. These three stand in for that.
 
-    uv run python generate_docs.py
+    uv run python -m seed.generate_docs
 """
 
 import os
