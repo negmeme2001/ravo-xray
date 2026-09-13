@@ -16,6 +16,7 @@ dev = [
     "httpx",
     "pdfplumber",
     "fpdf2",
+    "uvicorn>=0.52.4",
 ]
 
 [tool.pytest.ini_options]
