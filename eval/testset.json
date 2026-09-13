@@ -31,7 +31,7 @@
     {"query": "a drink without caffeine", "tag": "negation", "relevant_types": ["Orange Juice", "Apple Juice", "Lemonade", "Coconut Water", "Mineral Water", "Sparkling Water"]},
     {"query": "snacks with no chocolate", "tag": "negation", "relevant_types": ["Potato Chips", "Salted Peanuts", "Rice Crackers", "Popcorn", "Pretzels", "Trail Mix", "Granola Bar"]},
     {"query": "Juhayna Greek Yogurt", "tag": "brand", "relevant_names": ["Juhayna Greek Yogurt"]},
-    {"query": "Almarai Orange Juice", "tag": "brand", "relevant_names": ["Almarai Orange Juice"]},
+    {"query": "Almarai Apple Juice", "tag": "brand", "relevant_names": ["Almarai Apple Juice"]},
     {"query": "Panda Frozen Pizza", "tag": "brand", "relevant_names": ["Panda Frozen Pizza"]}
   ],
   "documents": [

@@ -1,0 +1,202 @@
+{
+  "generated_at": "2026-09-13T23:48:22.323977+00:00",
+  "environment": "local replica",
+  "products": {
+    "k": 5,
+    "production_config": "full",
+    "configs": [
+      {
+        "key": "name",
+        "name": "Product name only",
+        "metrics": {
+          "hit_at_1": 0.742,
+          "hit_at_5": 0.871,
+          "mrr": 0.785,
+          "diversity_at_5": 1.5,
+          "p50_search_ms": 1.9
+        },
+        "by_tag": {
+          "semantic": {
+            "hit_at_5": 0.864,
+            "n": 22
+          },
+          "direct": {
+            "hit_at_5": 1.0,
+            "n": 3
+          },
+          "negation": {
+            "hit_at_5": 0.667,
+            "n": 3
+          },
+          "brand": {
+            "hit_at_5": 1.0,
+            "n": 3
+          }
+        },
+        "failures": [
+          {
+            "query": "cheese for a pizza",
+            "tag": "semantic",
+            "top": [
+              "Panda Frozen Pizza",
+              "Panda Frozen Pizza",
+              "Panda Frozen Pizza"
+            ]
+          },
+          {
+            "query": "wrap leftovers before putting them in the fridge",
+            "tag": "semantic",
+            "top": [
+              "Lamar Frozen Vegetables",
+              "Lamar Frozen Vegetables",
+              "Lamar Frozen Vegetables"
+            ]
+          },
+          {
+            "query": "a drink to rehydrate after a workout",
+            "tag": "semantic",
+            "top": [
+              "Juhayna Energy Drink",
+              "Beyti Energy Drink",
+              "Almarai Energy Drink"
+            ]
+          },
+          {
+            "query": "snacks with no chocolate",
+            "tag": "negation",
+            "top": [
+              "Generic Chocolate Bar",
+              "Generic Chocolate Bar",
+              "Generic Chocolate Bar"
+            ]
+          }
+        ]
+      },
+      {
+        "key": "full",
+        "name": "Name, category and description",
+        "metrics": {
+          "hit_at_1": 0.806,
+          "hit_at_5": 0.839,
+          "mrr": 0.817,
+          "diversity_at_5": 1.8,
+          "p50_search_ms": 1.8
+        },
+        "by_tag": {
+          "semantic": {
+            "hit_at_5": 0.909,
+            "n": 22
+          },
+          "direct": {
+            "hit_at_5": 1.0,
+            "n": 3
+          },
+          "negation": {
+            "hit_at_5": 0.0,
+            "n": 3
+          },
+          "brand": {
+            "hit_at_5": 1.0,
+            "n": 3
+          }
+        },
+        "failures": [
+          {
+            "query": "a drink to rehydrate after a workout",
+            "tag": "semantic",
+            "top": [
+              "Juhayna Energy Drink",
+              "Domty Energy Drink",
+              "Almarai Energy Drink"
+            ]
+          },
+          {
+            "query": "something to spread on toast",
+            "tag": "semantic",
+            "top": [
+              "President Bagel",
+              "Beyti Croissant",
+              "Domty Muffin"
+            ]
+          },
+          {
+            "query": "milk that isn't from a cow",
+            "tag": "negation",
+            "top": [
+              "President Skimmed Milk",
+              "Domty Skimmed Milk",
+              "Panda Skimmed Milk"
+            ]
+          },
+          {
+            "query": "a drink without caffeine",
+            "tag": "negation",
+            "top": [
+              "Panda Energy Drink",
+              "Generic Green Tea",
+              "Domty Energy Drink"
+            ]
+          },
+          {
+            "query": "snacks with no chocolate",
+            "tag": "negation",
+            "top": [
+              "Generic Chocolate Bar",
+              "Generic Chocolate Bar",
+              "Generic Chocolate Bar"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "documents": {
+    "k": 3,
+    "production_config": "chunk-100",
+    "configs": [
+      {
+        "key": "chunk-100",
+        "name": "100-word chunks",
+        "metrics": {
+          "hit_at_1": 0.941,
+          "hit_at_3": 1.0,
+          "mrr": 0.971,
+          "p50_search_ms": 1.0
+        },
+        "by_tag": {
+          "semantic": {
+            "hit_at_3": 1.0,
+            "n": 14
+          },
+          "direct": {
+            "hit_at_3": 1.0,
+            "n": 3
+          }
+        },
+        "failures": []
+      },
+      {
+        "key": "chunk-200",
+        "name": "200-word chunks",
+        "metrics": {
+          "hit_at_1": 0.824,
+          "hit_at_3": 1.0,
+          "mrr": 0.912,
+          "p50_search_ms": 0.6
+        },
+        "by_tag": {
+          "semantic": {
+            "hit_at_3": 1.0,
+            "n": 14
+          },
+          "direct": {
+            "hit_at_3": 1.0,
+            "n": 3
+          }
+        },
+        "failures": []
+      }
+    ]
+  },
+  "invalid_labels": []
+}

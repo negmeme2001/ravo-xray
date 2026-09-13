@@ -27,11 +27,13 @@ PRODUCT_CONFIGS = [
     ("name", "Product name only"),
     ("full", "Name, category and description"),
 ]
+# 500-word chunks were dropped: with three short documents they collapse to one
+# chunk per document, so "top 3" becomes the whole corpus and the score says nothing.
 DOCUMENT_CONFIGS = [
     (100, 20),
     (200, 40),
-    (500, 40),
 ]
+PRODUCTION_DOCUMENT_CONFIG = (100, 20)
 
 
 def require_env() -> None:
@@ -173,7 +175,8 @@ def run_documents(source_cases: list[dict], skip_ingest: bool) -> list[dict]:
 
 def restore_production() -> None:
     ingest_products.main(16, 64, "full")
-    ingest_pdfs.main(pdf_paths(), 200, 40, 16, 64)
+    chunk_size, overlap = PRODUCTION_DOCUMENT_CONFIG
+    ingest_pdfs.main(pdf_paths(), chunk_size, overlap, 16, 64)
 
 
 def print_summary(results: dict) -> None:
@@ -218,7 +221,11 @@ def main() -> None:
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "environment": "local replica",
         "products": {"k": 5, "production_config": "full", "configs": products_configs},
-        "documents": {"k": 3, "production_config": "chunk-200", "configs": documents_configs},
+        "documents": {
+            "k": 3,
+            "production_config": f"chunk-{PRODUCTION_DOCUMENT_CONFIG[0]}",
+            "configs": documents_configs,
+        },
         "invalid_labels": invalid_labels,
     }
     RESULTS_PATH.write_text(json.dumps(results, indent=2) + "\n")
