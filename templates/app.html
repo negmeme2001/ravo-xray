@@ -1,0 +1,165 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Ravo X-Ray</title>
+  <meta name="robots" content="noindex, nofollow">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible+Next:wght@400;600;700;800&display=swap">
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+<div class="page">
+
+  <header class="masthead">
+    <h1>Ravo X-Ray</h1>
+    <p class="purpose">Ask the store anything. Every answer comes with an x-ray of where its time went.</p>
+    <p class="byline">Built by Mohamed Negm</p>
+  </header>
+
+  <div class="workspace">
+    <main class="conversation" aria-label="Conversation with the store assistant">
+      <div class="thread" id="thread" aria-live="polite">
+        <div class="thread-empty" id="thread-empty">
+          <strong>Ask it like a shopper would.</strong>
+          It knows this store's 1,500 products and its policy, safety and FAQ documents.
+          Try one of these, or type your own question.
+        </div>
+      </div>
+
+      <div class="composer">
+        <div class="starters" id="starters">
+          <button class="starter" type="button" data-q="Something for a headache">Something for a headache</button>
+          <button class="starter" type="button" data-q="Can I return a laptop I bought last week?">Can I return a laptop I bought last week?</button>
+          <button class="starter" type="button" data-q="I need milk that isn't from a cow">Milk that isn't from a cow</button>
+          <button class="starter" type="button" data-q="Do you deliver, and how much is it?">Do you deliver?</button>
+        </div>
+        <form class="ask" id="ask-form" autocomplete="off">
+          <input id="ask-input" name="q" maxlength="500" aria-label="Your question" placeholder="Ask about products, prices, returns, delivery…" required>
+          <button class="btn" id="ask-button" type="submit">Ask</button>
+        </form>
+        <p class="limit-note" id="limit-note" hidden></p>
+      </div>
+    </main>
+
+    <aside class="guide" aria-label="How to read the x-ray">
+      <h2>Reading the x-ray</h2>
+      <p>Under every answer is a strip of film. Its length is the whole turn; each band is one step, sized by the time it took.</p>
+      <ul class="legend">
+        <li><span class="swatch sw-llm"></span><span><b>Thinking and writing</b>: the language model deciding what to look up, then writing the answer.</span></li>
+        <li><span class="swatch sw-embed"></span><span><b>Understanding the question</b>: turning it into an embedding. A cache hit makes this band almost vanish.</span></li>
+        <li><span class="swatch sw-search"></span><span><b>Searching</b>: finding the closest products or document passages in Postgres.</span></li>
+        <li><span class="swatch sw-hot"></span><span><b>Amber</b> marks the step that cost the most.</span></li>
+      </ul>
+      <p>Ask the same question twice and watch the second band shrink.</p>
+    </aside>
+  </div>
+
+  <div class="evidence">
+
+    <section aria-labelledby="where-time-goes">
+      <h2 id="where-time-goes">Where a 3-second answer spends its time</h2>
+      <div class="split">
+        <div>
+          <p class="lede">I rebuilt the search path locally to profile it before changing anything. The database was never the problem: the expensive step in retrieval is the call that turns a question into an embedding.</p>
+          <div class="figures">
+            <div class="figure"><div class="value num">6 ms</div><div class="what">searching 1,500 products in Postgres (median)</div></div>
+            <div class="figure"><div class="value num">526 ms</div><div class="what">turning the question into an embedding (median), with one spike to 1,728 ms</div></div>
+            <div class="figure"><div class="value num">~1 ms</div><div class="what">the same question again, served from the cache</div></div>
+          </div>
+        </div>
+        <figure class="film" style="margin:0">
+          <div style="display:flex;align-items:center;gap:0.6rem;font-size:0.875rem;color:var(--bone-dim);margin-bottom:0.7rem">
+            <span class="marker">L</span><span>Retrieval step, measured in the lab</span>
+          </div>
+          <div class="exposure" role="img" aria-label="Embedding 97.7 percent of retrieval time, search 2.3 percent">
+            <div class="seg seg-hot" style="flex-basis:97.7%"></div>
+            <div class="seg seg-search" style="flex-basis:2.3%"></div>
+          </div>
+          <div class="readings">
+            <div class="reading hot"><span class="swatch" style="background:var(--hot)"></span>Embedding <b class="num">97.7%</b></div>
+            <div class="reading"><span class="swatch" style="background:var(--glow);opacity:.55"></span>Search <b class="num">2.3%</b></div>
+          </div>
+          <figcaption class="reading" style="margin-top:0.7rem">Lab measurement over 10 queries. The full turn in the live x-ray above adds the language model, which is usually the largest band.</figcaption>
+        </figure>
+      </div>
+    </section>
+
+    <section aria-labelledby="scoreboard-title">
+      <h2 id="scoreboard-title">Every change to search gets a score</h2>
+      <p class="lede">A fixed set of shopper questions, each with a known right answer, run against every version of the search. This is what lets a team say "search got better" with a number instead of a feeling.</p>
+      <div id="scoreboard"><p class="lede">Loading the latest scores.</p></div>
+      <h3 style="margin:0.5rem 0 0">Questions it still gets wrong</h3>
+      <p style="color:var(--muted);margin:0">Kept on purpose. These are what the next improvements are measured against.</p>
+      <ul class="fail-list" id="scoreboard-fails"></ul>
+    </section>
+
+    <section aria-labelledby="plugs-title">
+      <h2 id="plugs-title">How this plugs into Ravo</h2>
+      <ul class="plug-list">
+        <li class="plug">
+          <h3>The cache</h3>
+          <p>One Redis lookup before the embedding call. Ravo already runs Redis, so a repeated question skips about half a second.</p>
+        </li>
+        <li class="plug">
+          <h3>The x-ray</h3>
+          <p>Timing around the embedding call, the search and each language-model call, written into the logging Ravo already has. The 3 seconds becomes a breakdown anyone can read.</p>
+        </li>
+        <li class="plug">
+          <h3>The scoreboard</h3>
+          <p>A labelled question set per store, run on every release. Search quality can be checked before it reaches a kiosk.</p>
+        </li>
+      </ul>
+    </section>
+
+    <section aria-labelledby="next-title">
+      <h2 id="next-title">What comes next</h2>
+      <ol class="next-list">
+        <li><b>Keyword and meaning together.</b> Hybrid search in the same Postgres, so exact brand and product names stop slipping. Measured by the brand questions above.</li>
+        <li><b>No more five copies of one product.</b> Collapse near-duplicates so the top results show real choices. Measured by result variety.</li>
+        <li><b>Understanding "not" and "without".</b> Rewrite negated questions before searching. Measured by the negation questions above.</li>
+        <li><b>The same assistant, spoken.</b> Voice with streaming speech recognition, so the kiosk hears the shopper while they are still talking.</li>
+      </ol>
+    </section>
+  </div>
+
+  <footer class="footer">
+    Built by Mohamed Negm, AI Engineer. The product catalog and store documents are synthetic, and the baseline shown is standard vector search.
+  </footer>
+</div>
+
+<!-- DOM contract for app.js -->
+<template id="tpl-user">
+  <article class="msg msg-user"><div class="bubble"></div></article>
+</template>
+
+<template id="tpl-assistant">
+  <article class="msg msg-assistant">
+    <div class="bubble"></div>
+    <div class="cards" hidden></div>
+    <div class="citations" hidden></div>
+    <details class="film">
+      <summary><span class="marker"></span><span class="film-caption">X-ray of this answer</span><span class="total num"></span></summary>
+      <div class="exposure"></div>
+      <div class="readings"></div>
+    </details>
+  </article>
+</template>
+
+<template id="tpl-card">
+  <div class="card">
+    <span class="card-name"></span>
+    <span class="card-meta"></span>
+    <div class="card-foot"><span class="card-price num"></span><span class="stock"></span></div>
+  </div>
+</template>
+
+<template id="tpl-citation">
+  <div class="citation"><div class="citation-source"></div><div class="citation-snippet"></div></div>
+</template>
+
+<script src="/app.js" defer></script>
+</body>
+</html>

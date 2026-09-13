@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Ravo X-Ray</title>
+  <meta name="robots" content="noindex, nofollow">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible+Next:wght@400;600;700;800&display=swap">
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <main class="gate">
+    <div class="gate-box">
+      <h1>Ravo X-Ray</h1>
+      <p>A store assistant that shows where every answer's time goes. Enter the access code you were sent.</p>
+      <form class="gate-form" id="gate-form">
+        <input id="code" name="code" type="password" autocomplete="off" placeholder="Access code" aria-label="Access code" required>
+        <button class="btn" type="submit">Enter</button>
+      </form>
+      <p class="gate-error" id="gate-error" role="alert"></p>
+    </div>
+  </main>
+  <script>
+    const form = document.getElementById("gate-form");
+    const error = document.getElementById("gate-error");
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      error.textContent = "";
+      const code = document.getElementById("code").value.trim();
+      const res = await fetch("/api/auth", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code }),
+      });
+      if (res.ok) {
+        window.location.href = "/";
+      } else if (res.status === 429) {
+        error.textContent = "Too many attempts. Wait a few minutes and try again.";
+      } else {
+        error.textContent = "That code isn't right. Check the message you received and try again.";
+      }
+    });
+  </script>
+</body>
+</html>
