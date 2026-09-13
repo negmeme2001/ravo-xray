@@ -25,6 +25,10 @@ def _openai_client():
     return _client
 
 
+def get_openai_client():
+    return _openai_client()
+
+
 def connect() -> psycopg.Connection:
     url = os.environ.get("DATABASE_URL")
     if not url:
