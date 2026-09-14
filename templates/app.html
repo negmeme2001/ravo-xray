@@ -132,7 +132,7 @@
         <li><b>Keyword and meaning together.</b> Hybrid search in the same Postgres, so exact brand and product names stop slipping. Measured by the brand questions above.</li>
         <li><b>No more five copies of one product.</b> Collapse near-duplicates so the top results show real choices. Measured by result variety.</li>
         <li><b>Understanding "not" and "without".</b> Rewrite negated questions before searching. Measured by the negation questions above.</li>
-        <li><b>Faster spoken turns.</b> Spoken answers carry the same x-ray, which shows two costs typed answers don't have: noticing the shopper has finished, and producing the first sound. Tuning end-of-turn detection and streaming the answer into speech sooner are the levers there.</li>
+        <li><b>Faster spoken turns.</b> Spoken answers carry the same x-ray. It showed the assistant waiting up to 2.5 s to be sure the shopper had finished; capping that wait at 1.2 s took a spoken turn from 3.5 s to 3.2 s. The saving was smaller than the cut because the model's first call had been running inside that wait, and it now shows as the next cost, which the one-call change above addresses.</li>
       </ol>
     </section>
   </div>

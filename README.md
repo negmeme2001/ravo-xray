@@ -81,6 +81,7 @@ uv run python -m eval.run_eval    # re-ingests each setup, scores it, writes eva
 2. Hybrid keyword + vector search in the same Postgres (brand and exact-name queries).
 3. Collapse near-duplicates in search results (raises variety in the top 5).
 4. Rewrite negated questions before searching (the negation rows).
-5. Faster spoken turns: tune end-of-turn detection and stream the answer into speech sooner (both visible in the spoken x-ray).
+5. Faster spoken turns: the spoken x-ray showed a 2.5 s end-of-turn wait; capping it at 1.2 s took a spoken turn
+   from 3.5 s to 3.2 s and exposed the model's first call as the next cost (item 1).
 
 Built by Mohamed Negm.

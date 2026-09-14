@@ -28,6 +28,10 @@ VOICE_MODEL = "gpt-4.1-mini"
 STT_MODEL = "deepgram/flux-general-en"
 TTS_MODEL = "cartesia/sonic-3"
 FALLBACK_TTS_VOICE = "ash"
+# The default turn detector waits up to 2.5 s when it isn't sure the shopper has
+# finished; the spoken x-ray showed that cap was most of every voice turn. Kiosk
+# questions are short, so a hesitating detector now commits after 1.2 s instead.
+MAX_END_OF_TURN_WAIT = 1.2
 MAX_PRODUCTS_FOR_VOICE = 5
 CARDS_TOPIC = "ravo.cards"
 TRACE_TOPIC = "ravo.trace"
@@ -153,6 +157,8 @@ class StoreAgent(Agent):
 
 def prewarm(proc: JobProcess) -> None:
     proc.userdata["vad"] = silero.VAD.load()
+    # Loading the HTTP parser lazily blocked the first turn's event loop for ~600 ms.
+    import h11._receivebuffer  # noqa: F401
 
 
 async def _say_goodbye_after_limit(session: AgentSession, ctx: JobContext) -> None:
@@ -176,6 +182,7 @@ async def entrypoint(ctx: JobContext) -> None:
         ),
         llm=openai.LLM(model=VOICE_MODEL),
         vad=ctx.proc.userdata["vad"],
+        turn_handling={"endpointing": {"max_delay": MAX_END_OF_TURN_WAIT}},
     )
     agent = StoreAgent()
     turn: dict = {"user_metrics": None}
