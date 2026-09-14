@@ -1,0 +1,13 @@
+.venv/
+.git/
+tests/
+seed/
+eval/
+public/
+templates/
+.vercel/
+.agents/
+.claude/
+.env*
+Dockerfile
+.dockerignore

@@ -8,7 +8,7 @@ from ravo_core.db import get_openai_client
 MODEL = "gpt-4.1-mini"
 MAX_LLM_CALLS = 3
 
-SYSTEM_PROMPT = (
+BASE_RULES = (
     "You are the in-store assistant at a supermarket kiosk. Answer in 2 to 4 short "
     "sentences. For every shopping question, including broad ones like 'a healthy "
     "snack for my kids' or 'something for a cold', call search_products first and "
@@ -21,6 +21,8 @@ SYSTEM_PROMPT = (
     "at most the one or two best matches by name and price instead of listing "
     "everything. When answering from a document, say which document it comes from."
 )
+
+SYSTEM_PROMPT = BASE_RULES
 
 TOOLS = [
     {
@@ -79,7 +81,7 @@ SEARCH_CANDIDATES = 10
 MAX_PRODUCTS_FOR_MODEL = 5
 
 
-def _unique_by_name(items: list[dict]) -> list[dict]:
+def unique_by_name(items: list[dict]) -> list[dict]:
     seen: set[str] = set()
     unique = []
     for item in items:  # already ordered best match first
@@ -116,7 +118,7 @@ def _stock_text(stock: int) -> str:
     return f"in stock ({stock})" if stock > 0 else "out of stock"
 
 
-def _render_products(items: list[dict]) -> str:
+def render_products(items: list[dict]) -> str:
     if not items:
         return "No matching results."
     return "\n".join(
@@ -128,7 +130,7 @@ def _render_products(items: list[dict]) -> str:
     )
 
 
-def _render_documents(items: list[dict]) -> str:
+def render_documents(items: list[dict]) -> str:
     if not items:
         return "No matching results."
     # The model gets the whole passage: an answer often sits past the first
@@ -196,13 +198,13 @@ def _execute_tool(call, steps: list[dict], cards: dict, citations: list[dict]) -
         # Same-named products (one brand's item at several prices) would let the
         # reply quote one price while a card shows another, so keep only the best
         # match per name for both the model and the cards.
-        result = {**result, "items": _unique_by_name(result["items"])[:MAX_PRODUCTS_FOR_MODEL]}
+        result = {**result, "items": unique_by_name(result["items"])[:MAX_PRODUCTS_FOR_MODEL]}
         steps.append(
             _tool_step("embed", "Understand the question", result["timing"]["embed_ms"], result["timing"]["cache"], name)
         )
         steps.append(_tool_step("search", "Search products", result["timing"]["search_ms"], None, name))
         _collect_cards(result["items"], cards)
-        return _render_products(result["items"])
+        return render_products(result["items"])
 
     if name == "search_documents":
         result = tools.search_documents(str(args.get("query", "")))
@@ -211,7 +213,7 @@ def _execute_tool(call, steps: list[dict], cards: dict, citations: list[dict]) -
         )
         steps.append(_tool_step("search", "Search documents", result["timing"]["search_ms"], None, name))
         _collect_citations(result["items"], citations)
-        return _render_documents(result["items"])
+        return render_documents(result["items"])
 
     return f"Tool error: unknown tool {name}"
 

@@ -8,6 +8,7 @@ dependencies = [
     "pgvector",
     "openai",
     "upstash-redis",
+    "livekit-api~=1.2",
 ]
 
 [dependency-groups]
@@ -17,6 +18,9 @@ dev = [
     "pdfplumber",
     "fpdf2",
     "uvicorn>=0.52.4",
+]
+voice = [
+    "livekit-agents[openai,silero]~=1.6",
 ]
 
 [tool.pytest.ini_options]
