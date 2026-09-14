@@ -81,6 +81,6 @@ uv run python -m eval.run_eval    # re-ingests each setup, scores it, writes eva
 2. Hybrid keyword + vector search in the same Postgres (brand and exact-name queries).
 3. Collapse near-duplicates in search results (raises variety in the top 5).
 4. Rewrite negated questions before searching (the negation rows).
-5. An x-ray for spoken answers: add speech recognition and synthesis to the timing breakdown.
+5. Faster spoken turns: tune end-of-turn detection and stream the answer into speech sooner (both visible in the spoken x-ray).
 
 Built by Mohamed Negm.

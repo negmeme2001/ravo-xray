@@ -165,17 +165,9 @@ function renderFilm(film, trace) {
 
     const reading = document.createElement("div");
     reading.className = "reading";
+    if (isHot) reading.classList.add("hot");
     const swatch = document.createElement("span");
-    swatch.className = "swatch";
-    if (isHot) {
-      reading.classList.add("hot");
-      swatch.style.background = "var(--hot)";
-    } else if (step.kind === "llm") {
-      swatch.style.background = "var(--bone)";
-    } else {
-      swatch.style.background = "var(--glow)";
-      if (step.kind === "search") swatch.style.opacity = "0.55";
-    }
+    swatch.className = "swatch sw-" + (isHot ? "hot" : step.kind);
     reading.append(swatch);
     reading.append(document.createTextNode(step.label + " "));
     const ms = document.createElement("b");
@@ -582,6 +574,23 @@ async function handleVoiceCards(stream) {
   scrollThread();
 }
 
+async function handleVoiceTrace(stream) {
+  let trace;
+  try {
+    trace = JSON.parse(await stream.readAll());
+  } catch {
+    return;
+  }
+  // The trace is sent once the spoken answer is committed, so the latest
+  // assistant bubble is the answer it describes.
+  const node = voiceLatestAssistant;
+  if (!node || !Array.isArray(trace.steps)) return;
+  const film = node.querySelector(".film");
+  film.querySelector(".film-caption").textContent = "X-ray of this spoken answer";
+  renderFilm(film, trace);
+  scrollThread();
+}
+
 function startVoiceTimer() {
   stopVoiceTimer();
   voiceSecondsLeft = VOICE_SESSION_SECONDS;
@@ -644,6 +653,7 @@ async function checkVoiceStatus() {
   if (data.enabled) {
     talkButton.hidden = false;
     voiceHint.hidden = false;
+    document.getElementById("legend-voice").hidden = false;
   }
 }
 
@@ -702,6 +712,7 @@ async function startVoice() {
     handleVoiceTranscription(stream, isUserSpeech);
   });
   room.registerTextStreamHandler("ravo.cards", handleVoiceCards);
+  room.registerTextStreamHandler("ravo.trace", handleVoiceTrace);
   room.on(LivekitClient.RoomEvent.ParticipantConnected, markAssistantPresent);
   room.on(LivekitClient.RoomEvent.Disconnected, cleanupVoiceCall);
 

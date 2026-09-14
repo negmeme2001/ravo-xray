@@ -194,6 +194,11 @@ a { color: var(--ink); text-underline-offset: 3px; }
 .seg-llm { background: var(--bone); opacity: 0.9; }
 .seg-embed { background: var(--glow); opacity: 0.9; }
 .seg-search { background: var(--glow); opacity: 0.55; }
+/* speech steps (spoken answers only) are hatched: sound, not thought or search */
+.seg-listen, .seg-speak, .sw-listen, .sw-speak {
+  background: repeating-linear-gradient(135deg, var(--bone-dim) 0 2px, var(--film-2) 2px 5px);
+  opacity: 1;
+}
 .seg-hot { background: var(--hot); opacity: 1; }
 .readings { display: grid; gap: 0.3rem 1.5rem; grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr)); margin-top: 0.7rem; }
 /* one reading per line: swatch, label, cache badge, then the time pushed right */

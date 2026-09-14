@@ -59,6 +59,7 @@
         <li><span class="swatch sw-llm"></span><span><b>Thinking and writing</b>: the language model deciding what to look up, then writing the answer.</span></li>
         <li><span class="swatch sw-embed"></span><span><b>Understanding the question</b>: turning it into an embedding. A cache hit makes this band almost vanish.</span></li>
         <li><span class="swatch sw-search"></span><span><b>Searching</b>: finding the closest products or document passages in Postgres.</span></li>
+        <li id="legend-voice" hidden><span class="swatch sw-listen"></span><span><b>Hearing and speaking</b>: in spoken answers, noticing you've finished talking, then producing the first sound of the reply.</span></li>
         <li><span class="swatch sw-hot"></span><span><b>Amber</b> marks the step that cost the most.</span></li>
       </ul>
       <p>Ask the same question twice and watch the second band shrink.</p>
@@ -131,7 +132,7 @@
         <li><b>Keyword and meaning together.</b> Hybrid search in the same Postgres, so exact brand and product names stop slipping. Measured by the brand questions above.</li>
         <li><b>No more five copies of one product.</b> Collapse near-duplicates so the top results show real choices. Measured by result variety.</li>
         <li><b>Understanding "not" and "without".</b> Rewrite negated questions before searching. Measured by the negation questions above.</li>
-        <li><b>An x-ray for spoken answers.</b> Voice already works through Talk, using the same search and cache. Its turns don't show a film yet; speech recognition and speech synthesis will join the timing breakdown next.</li>
+        <li><b>Faster spoken turns.</b> Spoken answers carry the same x-ray, which shows two costs typed answers don't have: noticing the shopper has finished, and producing the first sound. Tuning end-of-turn detection and streaming the answer into speech sooner are the levers there.</li>
       </ol>
     </section>
   </div>
