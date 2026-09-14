@@ -14,6 +14,7 @@ from livekit.agents import (
     function_tool,
     inference,
 )
+from livekit.agents import tts as agents_tts
 from livekit.plugins import openai, silero
 
 from ravo_core import assistant, tools
@@ -21,6 +22,11 @@ from ravo_core import assistant, tools
 AGENT_NAME = "ravo-xray"
 SESSION_LIMIT_SECONDS = 180
 VOICE_MODEL = "gpt-4.1-mini"
+# The agent runs in eu-central, where LiveKit Inference serves only models with
+# an EU endpoint (Inworld has none, so its sessions fail with REGION_RESTRICTED).
+STT_MODEL = "deepgram/flux-general-en"
+TTS_MODEL = "cartesia/sonic-3"
+FALLBACK_TTS_VOICE = "ash"
 MAX_PRODUCTS_FOR_VOICE = 5
 CARDS_TOPIC = "ravo.cards"
 BASE_RULES = assistant.BASE_RULES
@@ -114,8 +120,12 @@ async def _say_goodbye_after_limit(session: AgentSession, ctx: JobContext) -> No
 async def entrypoint(ctx: JobContext) -> None:
     await ctx.connect()
     session = AgentSession(
-        stt=inference.STT(model="deepgram/flux-general", language="en"),
-        tts=inference.TTS(model="inworld/inworld-tts-2:Ashley"),
+        stt=inference.STT(model=STT_MODEL, language="en"),
+        # A failing voice provider would leave the shopper in silence, so OpenAI's
+        # TTS takes over automatically if the primary errors.
+        tts=agents_tts.FallbackAdapter(
+            [inference.TTS(model=TTS_MODEL), openai.TTS(voice=FALLBACK_TTS_VOICE)]
+        ),
         llm=openai.LLM(model=VOICE_MODEL),
         vad=ctx.proc.userdata["vad"],
     )

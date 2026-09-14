@@ -702,6 +702,7 @@ async function startVoice() {
     handleVoiceTranscription(stream, isUserSpeech);
   });
   room.registerTextStreamHandler("ravo.cards", handleVoiceCards);
+  room.on(LivekitClient.RoomEvent.ParticipantConnected, markAssistantPresent);
   room.on(LivekitClient.RoomEvent.Disconnected, cleanupVoiceCall);
 
   try {
@@ -719,7 +720,6 @@ async function startVoice() {
     await room.startAudio();
   } catch {}
 
-  voiceStatus.textContent = "Listening";
   try {
     await room.localParticipant.setMicrophoneEnabled(true);
   } catch {
@@ -729,7 +729,19 @@ async function startVoice() {
     room.disconnect();
     return;
   }
-  startVoiceTimer();
+
+  // An idle assistant is asleep and takes a few seconds to join; the call's
+  // three minutes start when it arrives, not while it wakes.
+  if (room.remoteParticipants.size > 0) {
+    markAssistantPresent();
+  } else {
+    voiceStatus.textContent = "Starting the assistant… up to 20 seconds";
+  }
+}
+
+function markAssistantPresent() {
+  voiceStatus.textContent = "Listening";
+  if (voiceTimerId === null) startVoiceTimer();
 }
 
 function init() {
