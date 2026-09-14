@@ -241,8 +241,10 @@ a { color: var(--ink); text-underline-offset: 3px; }
 .sw-hot { background: var(--hot); }
 
 /* ---------- evidence sections on the lightbox ---------- */
-.evidence { margin-top: 3.5rem; display: grid; gap: 3.25rem; }
-.evidence section { display: grid; gap: 1rem; }
+/* minmax(0, 1fr): grid items otherwise grow to their widest content (the
+   scoreboard table) and push the page wider than a phone screen */
+.evidence { margin-top: 3.5rem; display: grid; gap: 3.25rem; grid-template-columns: minmax(0, 1fr); }
+.evidence section { display: grid; gap: 1rem; grid-template-columns: minmax(0, 1fr); }
 .evidence h2 { font-size: var(--step-2); line-height: 1.15; letter-spacing: -0.01em; margin: 0; text-wrap: balance; max-width: 30ch; }
 .evidence .lede { color: var(--muted); font-size: var(--step-1); line-height: 1.45; max-width: 60ch; margin: 0; }
 .split { display: grid; gap: 1.5rem; }
