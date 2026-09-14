@@ -63,11 +63,11 @@
       <h2 id="where-time-goes">Where a 3-second answer spends its time</h2>
       <div class="split">
         <div>
-          <p class="lede">I rebuilt the search path locally to profile it before changing anything. The database was never the problem: the expensive step in retrieval is the call that turns a question into an embedding.</p>
+          <p class="lede">I rebuilt the search path to profile it before changing anything. The database was never the problem. Within retrieval, the expensive step is the call that turns a question into an embedding, which the cache removes; across the whole answer, the language model is the largest cost by far.</p>
           <div class="figures">
             <div class="figure"><div class="value num">6 ms</div><div class="what">searching 1,500 products in Postgres (median)</div></div>
-            <div class="figure"><div class="value num">526 ms</div><div class="what">turning the question into an embedding (median), with one spike to 1,728 ms</div></div>
-            <div class="figure"><div class="value num">~1 ms</div><div class="what">the same question again, served from the cache</div></div>
+            <div class="figure"><div class="value num">164 ms</div><div class="what">turning the question into an embedding from this server; 526 ms from a home connection, with one spike to 1,728 ms</div></div>
+            <div class="figure"><div class="value num">3 ms</div><div class="what">the same question again, served from the cache</div></div>
           </div>
         </div>
         <figure class="film" style="margin:0">
@@ -118,6 +118,7 @@
     <section aria-labelledby="next-title">
       <h2 id="next-title">What comes next</h2>
       <ol class="next-list">
+        <li><b>One language-model call instead of two.</b> In this demo the model is about nine tenths of every answer: roughly 0.9 s deciding what to look up, then 0.9 s writing. Routing common questions straight to search, and streaming the reply so the kiosk starts speaking sooner, is the biggest remaining speed win.</li>
         <li><b>Keyword and meaning together.</b> Hybrid search in the same Postgres, so exact brand and product names stop slipping. Measured by the brand questions above.</li>
         <li><b>No more five copies of one product.</b> Collapse near-duplicates so the top results show real choices. Measured by result variety.</li>
         <li><b>Understanding "not" and "without".</b> Rewrite negated questions before searching. Measured by the negation questions above.</li>
