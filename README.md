@@ -1,0 +1,82 @@
+# Ravo X-Ray
+
+A retail store assistant you can talk to, where every answer comes with an **x-ray**: a trace of
+where that answer's time went. Built to show three additions to a Ravo-style retrieval stack:
+
+- **Faster**: a Redis query-embedding cache, plus a per-turn latency trace.
+- **Measurable**: a labelled eval set that scores every search setup.
+- **Honest about failures**: known weak spots (negation, near-duplicates) are kept on the
+  scoreboard as the targets for the next improvements.
+
+The data is synthetic: a 1,500-product catalog and three store documents. The baseline is
+standard vector search.
+
+## What it found
+
+| Finding | Number |
+|---|---|
+| Postgres + pgvector search over 1,500 products | **~3–6 ms** |
+| Turning a question into an embedding (OpenAI API, from the server) | **~160 ms**, spiking past 800 ms |
+| The same question again, from the Redis cache | **~3 ms** |
+| Share of a full answer spent in the language model (2 calls) | **about 90%** |
+| Right product first / in top 5 (name, category and description embedded) | **81% / 84%** |
+| Negation questions ("milk that isn't from a cow") answered correctly | **0 of 3** |
+| Distinct products in the top 5 | **1.8 of 5** |
+
+So the database is not the bottleneck. The cache removes the embedding call, and the biggest
+remaining lever is the language model: one call instead of two, and streaming the reply.
+
+## How it works
+
+```
+Browser ─► FastAPI on Vercel (fra1) ─► ravo_core
+                                        ├─ assistant.py   tool-calling loop (gpt-4.1-mini) + trace
+                                        ├─ tools.py       search_products / search_documents (pgvector, HNSW, ef_search=80)
+                                        ├─ embed_cache.py query-embedding cache (Upstash Redis, 30-day TTL)
+                                        └─ limits.py      rate limits
+                              Neon Postgres 16 + pgvector   Upstash Redis
+```
+
+- `app.py`: access-code gate (HMAC-signed cookie), `/api/chat`, `/api/eval`, `/api/health`.
+- `templates/app.html`, `public/`: the page. Plain HTML, CSS and JavaScript.
+- `seed/`: generates and loads the catalog and documents.
+- `eval/`: `testset.json` (31 product and 17 document questions with checkable answers),
+  `run_eval.py` (scores setups and writes `results.json`), `metrics.py`.
+
+## Run it locally
+
+```bash
+uv sync
+export DATABASE_URL=...  OPENAI_API_KEY=...  DEMO_ACCESS_CODE=...  SESSION_SECRET=...
+# optional cache: UPSTASH_REDIS_REST_URL / _TOKEN (or KV_REST_API_URL / _TOKEN)
+
+uv run python -m seed.generate_catalog
+uv run python -m seed.ingest_products
+uv run python -m seed.ingest_pdfs --chunk-size 100 --overlap 20
+uv run uvicorn dev:app --reload          # http://127.0.0.1:8000
+```
+
+## Tests and eval
+
+```bash
+uv run pytest -q                  # unit tests mock OpenAI and Redis; db tests need DATABASE_URL
+uv run python -m eval.run_eval    # re-ingests each setup, scores it, writes eval/results.json
+```
+
+## How each addition plugs into Ravo
+
+- **Cache:** one Redis lookup before the embedding call in the search service. Ravo already
+  runs Redis.
+- **Trace:** timing around the embedding call, the search and each model call, written to the
+  existing logging.
+- **Scoreboard:** a labelled question set per store, run on every release.
+
+## Next
+
+1. One model call instead of two for common questions, and a streamed reply.
+2. Hybrid keyword + vector search in the same Postgres (brand and exact-name queries).
+3. Collapse near-duplicates in search results (raises variety in the top 5).
+4. Rewrite negated questions before searching (the negation rows).
+5. Voice: the same assistant spoken, with streaming speech recognition.
+
+Built by Mohamed Negm.

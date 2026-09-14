@@ -2,8 +2,8 @@
 Ingest PDF documents into Postgres: extract text, chunk it, embed each chunk,
 bulk-load, build an HNSW index.
 
-This is the miniature of Ravo's document pipeline (§8/§10 of onboarding):
-a "collection" (PDF) -> chunks -> embed (text-embedding-3-small) -> collections_embedding.
+A small version of a retail document pipeline:
+a document (PDF) -> chunks -> embed (text-embedding-3-small) -> the documents table.
 
 Chunking is the PDF-specific Pillar 1 lever: what text lands in each embedding
 decides what "similar" means. CHUNK_SIZE / CHUNK_OVERLAP are the knobs — change

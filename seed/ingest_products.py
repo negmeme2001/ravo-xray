@@ -1,8 +1,8 @@
 """
 Ingest catalog.jsonl into Postgres: embed every product, bulk-load, build an HNSW index.
 
-This is the miniature of Ravo's ingestion pipeline (§10 of onboarding):
-external feed -> standardized JSON -> embed (text-embedding-3-small) -> products + products_embedding.
+A small version of a retail catalog ingestion pipeline:
+catalog feed -> standardized JSON -> embed (text-embedding-3-small) -> the products table.
 
 Usage:
     uv run python -m seed.ingest_products                  # defaults: m=16, ef_construction=64, full text
