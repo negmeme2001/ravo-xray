@@ -5,3 +5,7 @@ skills-lock.json
 .venv
 tests
 seed
+agent
+Dockerfile
+.dockerignore
+livekit.toml

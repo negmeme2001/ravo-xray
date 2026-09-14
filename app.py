@@ -10,11 +10,13 @@ import json
 import logging
 import os
 import time
-from datetime import datetime, timezone
+import uuid
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from fastapi import Body, Depends, FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from livekit.api import AccessToken, RoomAgentDispatch, RoomConfiguration, VideoGrants
 
 from ravo_core import assistant, tools
 from ravo_core.embed_cache import get_redis
@@ -28,6 +30,11 @@ EVAL_RESULTS_PATH = ROOT / "eval" / "results.json"
 CONVERSATION_TURN_LIMIT = 20
 MAX_USER_CHARS = 500
 MAX_ASSISTANT_CHARS = 2000
+
+VOICE_ROOM_TTL_MINUTES = 10
+VOICE_PER_IP_LIMIT = 10
+VOICE_PER_IP_WINDOW_SECONDS = 3600
+VOICE_AGENT_NAME = "ravo-xray"
 
 logger = logging.getLogger(__name__)
 
@@ -79,6 +86,14 @@ def require_session(request: Request) -> None:
 
 def _is_configured() -> bool:
     return bool(os.environ.get("DEMO_ACCESS_CODE") and os.environ.get("SESSION_SECRET"))
+
+
+def _voice_is_enabled() -> bool:
+    return bool(
+        os.environ.get("LIVEKIT_URL")
+        and os.environ.get("LIVEKIT_API_KEY")
+        and os.environ.get("LIVEKIT_API_SECRET")
+    )
 
 
 def _validate_chat_payload(payload: dict) -> str | None:
@@ -220,3 +235,50 @@ def eval_scores(_: None = Depends(require_session)):
     if not EVAL_RESULTS_PATH.is_file():
         raise HTTPException(status_code=404, detail={"error": "No scores yet."})
     return json.loads(EVAL_RESULTS_PATH.read_text(encoding="utf-8"))
+
+
+@app.get("/api/voice/status")
+def voice_status(_: None = Depends(require_session)):
+    return {"enabled": _voice_is_enabled()}
+
+
+@app.post("/api/voice/token")
+def voice_token(request: Request, _: None = Depends(require_session)):
+    if not _voice_is_enabled():
+        raise HTTPException(status_code=503, detail={"error": "Voice isn't set up yet."})
+
+    ip = _client_ip(request)
+    if not allow(f"voice:{ip}", VOICE_PER_IP_LIMIT, VOICE_PER_IP_WINDOW_SECONDS):
+        raise HTTPException(
+            status_code=429,
+            detail={"error": "Too many voice sessions from this network. Try again later."},
+        )
+
+    room = f"rx-{uuid.uuid4().hex[:12]}"
+    identity = f"shopper-{uuid.uuid4().hex[:8]}"
+
+    room_config = RoomConfiguration(name=room)
+    room_config.agents.append(RoomAgentDispatch(agent_name=VOICE_AGENT_NAME))
+
+    token = (
+        AccessToken(
+            os.environ["LIVEKIT_API_KEY"],
+            os.environ["LIVEKIT_API_SECRET"],
+        )
+        .with_identity(identity)
+        .with_name("Shopper")
+        .with_ttl(timedelta(minutes=VOICE_ROOM_TTL_MINUTES))
+        .with_room_config(room_config)
+        .with_grants(
+            VideoGrants(
+                room_join=True,
+                room=room,
+                can_publish=True,
+                can_subscribe=True,
+                can_publish_data=True,
+            )
+        )
+        .to_jwt()
+    )
+
+    return {"url": os.environ["LIVEKIT_URL"], "token": token, "room": room}

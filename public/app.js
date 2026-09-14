@@ -442,6 +442,296 @@ async function loadScoreboard() {
   }
 }
 
+/* ---------- voice ---------- */
+const VOICE_SDK_URL =
+  "https://cdn.jsdelivr.net/npm/livekit-client@2.22.3/dist/livekit-client.umd.js";
+const VOICE_SESSION_SECONDS = 180;
+
+let talkButton;
+let voiceHint;
+let voiceBar;
+let voiceStatus;
+let voiceTimer;
+let voiceEnd;
+let voiceRoom = null;
+let voiceSdkPromise = null;
+let voiceTimerId = null;
+let voiceSecondsLeft = 0;
+let voiceAudioEls = [];
+let voiceAssistantBubbles = new Map();
+let voiceLatestAssistant = null;
+let voiceAwaitingReply = null;
+
+function formatVoiceTime(totalSeconds) {
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return minutes + ":" + String(seconds).padStart(2, "0");
+}
+
+function showVoiceThreadContent() {
+  threadEmpty.hidden = true;
+  scrollThread();
+}
+
+function voiceAttrs(stream) {
+  return stream.info.attributes || {};
+}
+
+function segmentKey(stream) {
+  return voiceAttrs(stream)["lk.segment_id"] || stream.info.id;
+}
+
+function voiceBubbleForSegment(segmentId) {
+  let node = voiceAssistantBubbles.get(segmentId);
+  if (!node) {
+    // The agent sends product cards while it searches, before it speaks; the
+    // spoken answer that follows fills the bubble the cards are already under.
+    if (voiceAwaitingReply) {
+      node = voiceAwaitingReply;
+      voiceAwaitingReply = null;
+    } else {
+      node = cloneTemplate("tpl-assistant");
+      node.querySelector(".film").hidden = true;
+      thread.append(node);
+      showVoiceThreadContent();
+    }
+    voiceAssistantBubbles.set(segmentId, node);
+  }
+  voiceLatestAssistant = node;
+  return node;
+}
+
+function setVoiceBubbleText(node, text) {
+  const bubble = node.querySelector(".bubble");
+  if (bubble.textContent !== text) {
+    bubble.textContent = text;
+    scrollThread();
+  }
+}
+
+function renderVoiceError(message) {
+  const node = cloneTemplate("tpl-assistant");
+  node.classList.add("msg-error");
+  node.querySelector(".film").hidden = true;
+  node.querySelector(".bubble").textContent = message;
+  thread.append(node);
+  showVoiceThreadContent();
+}
+
+function restoreTalkButton() {
+  talkButton.disabled = false;
+}
+
+function resetVoiceUI() {
+  stopVoiceTimer();
+  voiceBar.hidden = true;
+  restoreTalkButton();
+}
+
+function cleanupVoiceNotes() {
+  for (const el of voiceAudioEls) el.remove();
+  voiceAudioEls = [];
+  voiceAssistantBubbles = new Map();
+  voiceLatestAssistant = null;
+  voiceAwaitingReply = null;
+}
+
+async function handleVoiceTranscription(stream, isUserSpeech) {
+  let text = "";
+  for await (const chunk of stream) {
+    text += chunk;
+    if (!isUserSpeech && text) {
+      setVoiceBubbleText(voiceBubbleForSegment(segmentKey(stream)), text);
+    }
+  }
+  const final = voiceAttrs(stream)["lk.transcription_final"] === "true";
+  if (isUserSpeech) {
+    if (final && text) {
+      const node = cloneTemplate("tpl-user");
+      node.querySelector(".bubble").textContent = text;
+      thread.append(node);
+      showVoiceThreadContent();
+    }
+  } else if (text) {
+    setVoiceBubbleText(voiceBubbleForSegment(segmentKey(stream)), text);
+  }
+}
+
+async function handleVoiceCards(stream) {
+  let text;
+  try {
+    text = await stream.readAll();
+  } catch {
+    return;
+  }
+  let data;
+  try {
+    data = JSON.parse(text);
+  } catch {
+    return;
+  }
+  const cards = data.cards;
+  if (!Array.isArray(cards) || !cards.length) return;
+  const node = cloneTemplate("tpl-assistant");
+  node.querySelector(".film").hidden = true;
+  thread.append(node);
+  voiceAwaitingReply = node;
+  const wrap = node.querySelector(".cards");
+  for (const item of cards) wrap.append(renderCard(item));
+  wrap.hidden = false;
+  scrollThread();
+}
+
+function startVoiceTimer() {
+  stopVoiceTimer();
+  voiceSecondsLeft = VOICE_SESSION_SECONDS;
+  voiceTimer.textContent = formatVoiceTime(voiceSecondsLeft);
+  voiceTimerId = setInterval(() => {
+    voiceSecondsLeft -= 1;
+    voiceTimer.textContent = formatVoiceTime(Math.max(voiceSecondsLeft, 0));
+    if (voiceSecondsLeft <= 0) {
+      stopVoiceTimer();
+      if (voiceRoom) voiceRoom.disconnect();
+    }
+  }, 1000);
+}
+
+function stopVoiceTimer() {
+  if (voiceTimerId !== null) {
+    clearInterval(voiceTimerId);
+    voiceTimerId = null;
+  }
+}
+
+function cleanupVoiceCall() {
+  voiceRoom = null;
+  resetVoiceUI();
+  cleanupVoiceNotes();
+  const note = cloneTemplate("tpl-assistant");
+  note.querySelector(".film").hidden = true;
+  setVoiceBubbleText(note, "Voice session ended.");
+  thread.append(note);
+  showVoiceThreadContent();
+}
+
+function loadVoiceSdk() {
+  if (!voiceSdkPromise) {
+    voiceSdkPromise = new Promise((resolve, reject) => {
+      const script = document.createElement("script");
+      script.src = VOICE_SDK_URL;
+      script.onload = () => resolve(window.LivekitClient);
+      script.onerror = () => reject(new Error("Couldn't load the voice SDK."));
+      document.head.append(script);
+    });
+  }
+  return voiceSdkPromise;
+}
+
+async function checkVoiceStatus() {
+  let response;
+  try {
+    response = await fetch("/api/voice/status");
+  } catch {
+    return;
+  }
+  if (!response.ok) return;
+  let data;
+  try {
+    data = await response.json();
+  } catch {
+    return;
+  }
+  if (data.enabled) {
+    talkButton.hidden = false;
+    voiceHint.hidden = false;
+  }
+}
+
+async function startVoice() {
+  talkButton.disabled = true;
+  voiceBar.hidden = false;
+  voiceStatus.textContent = "Connecting…";
+
+  let response;
+  try {
+    response = await fetch("/api/voice/token", { method: "POST" });
+  } catch {
+    renderVoiceError("Couldn't reach the voice service. Try again in a moment.");
+    resetVoiceUI();
+    return;
+  }
+  if (!response.ok) {
+    renderVoiceError(await parseError(response));
+    resetVoiceUI();
+    return;
+  }
+  let data;
+  try {
+    data = await response.json();
+  } catch {
+    renderVoiceError("The voice service sent an unreadable reply. Try again in a moment.");
+    resetVoiceUI();
+    return;
+  }
+
+  let LivekitClient;
+  try {
+    LivekitClient = await loadVoiceSdk();
+  } catch (error) {
+    renderVoiceError(error && error.message ? error.message : "Couldn't load the voice SDK.");
+    resetVoiceUI();
+    return;
+  }
+
+  const room = new LivekitClient.Room();
+  voiceRoom = room;
+
+  room.on(LivekitClient.RoomEvent.TrackSubscribed, (track) => {
+    if (track.kind === "audio") {
+      const attached = track.attach();
+      const elements = Array.isArray(attached) ? attached : [attached];
+      for (const el of elements) {
+        voiceAudioEls.push(el);
+        document.body.append(el);
+      }
+    }
+  });
+
+  room.registerTextStreamHandler("lk.transcription", (stream, participantInfo) => {
+    const isUserSpeech = participantInfo.identity === room.localParticipant.identity;
+    handleVoiceTranscription(stream, isUserSpeech);
+  });
+  room.registerTextStreamHandler("ravo.cards", handleVoiceCards);
+  room.on(LivekitClient.RoomEvent.Disconnected, cleanupVoiceCall);
+
+  try {
+    await room.connect(data.url, data.token);
+  } catch (error) {
+    voiceRoom = null;
+    renderVoiceError(error && error.message ? error.message : "Voice couldn't connect.");
+    resetVoiceUI();
+    return;
+  }
+
+  // Browsers with strict autoplay rules (Safari) only play the agent's voice
+  // after an explicit start inside the user's Talk gesture.
+  try {
+    await room.startAudio();
+  } catch {}
+
+  voiceStatus.textContent = "Listening";
+  try {
+    await room.localParticipant.setMicrophoneEnabled(true);
+  } catch {
+    renderVoiceError(
+      "Microphone access is blocked. Allow it in your browser to talk, or type your question instead."
+    );
+    room.disconnect();
+    return;
+  }
+  startVoiceTimer();
+}
+
 function init() {
   thread = document.getElementById("thread");
   threadEmpty = document.getElementById("thread-empty");
@@ -461,6 +751,18 @@ function init() {
     starter.addEventListener("click", () => send(starter.dataset.q));
   }
 
+  talkButton = document.getElementById("talk-button");
+  voiceHint = document.getElementById("voice-hint");
+  voiceBar = document.getElementById("voice-bar");
+  voiceStatus = document.getElementById("voice-status");
+  voiceTimer = document.getElementById("voice-timer");
+  voiceEnd = document.getElementById("voice-end");
+  talkButton.addEventListener("click", startVoice);
+  voiceEnd.addEventListener("click", () => {
+    if (voiceRoom) voiceRoom.disconnect();
+  });
+
+  checkVoiceStatus();
   fetch("/api/health").catch(() => {});
   loadScoreboard();
 }
