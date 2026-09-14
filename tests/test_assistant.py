@@ -54,7 +54,7 @@ def _search_products(items, monkeypatch, timing=None):
     monkeypatch.setattr(
         tools,
         "search_products",
-        lambda query, in_stock_only=False: {
+        lambda query, k=5, in_stock_only=False: {
             "items": items,
             "timing": timing or {"embed_ms": 0.0, "cache": "miss", "search_ms": 0.0},
         },
@@ -228,3 +228,25 @@ def test_weak_citations_are_dropped():
     ]
     kept = assistant._relevant_citations(citations)
     assert [c["snippet"] for c in kept] == ["delivery", "ordering"]
+
+
+def test_same_named_products_collapse_to_the_best_match(monkeypatch):
+    items = [
+        {"code": "P1", "name": "Lamar Popcorn", "category": "Snacks", "price_egp": 213.34, "stock": 200, "similarity": 0.61},
+        {"code": "P2", "name": "Panda Trail Mix", "category": "Snacks", "price_egp": 485.69, "stock": 3, "similarity": 0.60},
+        {"code": "P3", "name": "Lamar Popcorn", "category": "Snacks", "price_egp": 34.35, "stock": 12, "similarity": 0.58},
+    ]
+    _search_products(items, monkeypatch)
+    client = _install_client(
+        monkeypatch,
+        [
+            _Response(tool_calls=[_ToolCall("call-1", "search_products", '{"query": "healthy snack"}')]),
+            _Response(content="Try Lamar Popcorn."),
+        ],
+    )
+
+    result = assistant.run_turn([{"role": "user", "content": "healthy snack for kids"}])
+
+    assert [c["code"] for c in result["cards"]] == ["P1", "P2"]
+    model_view = _tool_messages(client)[0]["content"]
+    assert "213.34" in model_view and "34.35" not in model_view

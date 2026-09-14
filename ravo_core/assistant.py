@@ -75,6 +75,18 @@ MAX_CITATIONS = 3
 # Only cite passages nearly as relevant as the best one; weaker ones are noise
 # (a staff-safety passage under a delivery answer, for example).
 CITATION_SIMILARITY_MARGIN = 0.08
+SEARCH_CANDIDATES = 10
+MAX_PRODUCTS_FOR_MODEL = 5
+
+
+def _unique_by_name(items: list[dict]) -> list[dict]:
+    seen: set[str] = set()
+    unique = []
+    for item in items:  # already ordered best match first
+        if item["name"] not in seen:
+            seen.add(item["name"])
+            unique.append(item)
+    return unique
 
 
 def _llm_step(label: str, ms: float) -> dict:
@@ -178,8 +190,13 @@ def _execute_tool(call, steps: list[dict], cards: dict, citations: list[dict]) -
     if name == "search_products":
         result = tools.search_products(
             str(args.get("query", "")),
+            k=SEARCH_CANDIDATES,
             in_stock_only=bool(args.get("in_stock_only", False)),
         )
+        # Same-named products (one brand's item at several prices) would let the
+        # reply quote one price while a card shows another, so keep only the best
+        # match per name for both the model and the cards.
+        result = {**result, "items": _unique_by_name(result["items"])[:MAX_PRODUCTS_FOR_MODEL]}
         steps.append(
             _tool_step("embed", "Understand the question", result["timing"]["embed_ms"], result["timing"]["cache"], name)
         )
