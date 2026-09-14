@@ -70,6 +70,9 @@ TOOLS = [
 SNIPPET_WORDS = 30
 MAX_CARDS = 6
 MAX_CITATIONS = 3
+# Only cite passages nearly as relevant as the best one; weaker ones are noise
+# (a staff-safety passage under a delivery answer, for example).
+CITATION_SIMILARITY_MARGIN = 0.08
 
 
 def _llm_step(label: str, ms: float) -> dict:
@@ -139,14 +142,26 @@ def _collect_cards(items: list[dict], cards: dict) -> None:
 
 def _collect_citations(items: list[dict], citations: list[dict]) -> None:
     for item in items:
+        snippet = _snippet(item["content"])
+        # Passages after the first begin mid-document, so mark the cut.
+        if item["chunk_index"] > 0:
+            snippet = "… " + snippet
         citations.append(
             {
                 "title": item["title"],
                 "chunk_index": item["chunk_index"],
-                "snippet": _snippet(item["content"]),
+                "snippet": snippet,
                 "similarity": item["similarity"],
             }
         )
+
+
+def _relevant_citations(citations: list[dict]) -> list[dict]:
+    if not citations:
+        return []
+    best = max(c["similarity"] for c in citations)
+    kept = [c for c in citations if c["similarity"] >= best - CITATION_SIMILARITY_MARGIN]
+    return sorted(kept, key=lambda c: c["similarity"], reverse=True)[:MAX_CITATIONS]
 
 
 def _execute_tool(call, steps: list[dict], cards: dict, citations: list[dict]) -> str:
@@ -231,6 +246,6 @@ def run_turn(messages: list[dict]) -> dict:
     return {
         "reply": reply,
         "cards": list(cards.values())[:MAX_CARDS],
-        "citations": citations[:MAX_CITATIONS],
+        "citations": _relevant_citations(citations),
         "trace": {"steps": steps, "total_ms": round(total.ms, 1)},
     }

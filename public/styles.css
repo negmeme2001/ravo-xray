@@ -112,7 +112,7 @@ a { color: var(--ink); text-underline-offset: 3px; }
   font-size: var(--step-3); font-weight: 800; letter-spacing: -0.03em; line-height: 1;
   margin: 0; text-wrap: balance;
 }
-.masthead .purpose { flex: 1 1 26rem; color: var(--muted); font-size: var(--step-1); line-height: 1.4; margin: 0; }
+.masthead .purpose { flex: 1 1 26rem; color: var(--muted); font-size: var(--step-1); line-height: 1.4; margin: 0; text-wrap: pretty; }
 .masthead .byline { font-size: var(--step--1); color: var(--muted); margin: 0; }
 
 /* ---------- workspace: conversation + reading guide ---------- */
@@ -195,11 +195,13 @@ a { color: var(--ink); text-underline-offset: 3px; }
 .seg-embed { background: var(--glow); opacity: 0.9; }
 .seg-search { background: var(--glow); opacity: 0.55; }
 .seg-hot { background: var(--hot); opacity: 1; }
-.readings { display: grid; gap: 0.2rem 1rem; grid-template-columns: repeat(auto-fit, minmax(9.5rem, 1fr)); margin-top: 0.6rem; }
-.reading { font-size: var(--step--1); color: var(--bone-dim); display: flex; gap: 0.4rem; align-items: baseline; }
+.readings { display: grid; gap: 0.3rem 1.5rem; grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr)); margin-top: 0.7rem; }
+/* one reading per line: swatch, label, cache badge, then the time pushed right */
+.reading { font-size: var(--step--1); color: var(--bone-dim); display: flex; gap: 0.45rem; align-items: baseline; }
 .reading .swatch { width: 0.6rem; height: 0.6rem; border-radius: 2px; flex: none; transform: translateY(1px); }
-.reading b { color: var(--bone); font-weight: 700; }
+.reading b { color: var(--bone); font-weight: 700; white-space: nowrap; order: 2; margin-left: auto; }
 .reading.hot b { color: var(--hot); }
+.cache-hit, .cache-miss { white-space: nowrap; order: 1; font-size: 0.8rem; }
 .cache-hit { color: var(--glow); font-weight: 700; }
 .cache-miss { color: var(--bone-dim); }
 
@@ -230,9 +232,10 @@ a { color: var(--ink); text-underline-offset: 3px; }
 .guide h2 { font-size: var(--step-1); margin: 0; line-height: 1.25; }
 .guide p { font-size: 0.95rem; color: var(--muted); margin: 0; }
 .legend { display: grid; gap: 0.45rem; margin: 0; padding: 0; list-style: none; font-size: 0.95rem; }
-.legend li { display: grid; grid-template-columns: 0.8rem 1fr; gap: 0.6rem; align-items: baseline; }
-.legend .swatch { width: 0.8rem; height: 0.8rem; border-radius: 2px; transform: translateY(2px); }
-.sw-llm { background: var(--bone); outline: 1px solid var(--film-edge); }
+.legend li { display: grid; grid-template-columns: 1rem 1fr; gap: 0.6rem; align-items: baseline; }
+/* each legend swatch is a tiny piece of film, so a light band still reads as a band */
+.legend .swatch { width: 1rem; height: 1rem; border-radius: 3px; border: 3px solid var(--film); transform: translateY(3px); }
+.sw-llm { background: var(--bone); }
 .sw-embed { background: var(--glow); }
 .sw-search { background: color-mix(in srgb, var(--glow) 55%, var(--film)); }
 .sw-hot { background: var(--hot); }

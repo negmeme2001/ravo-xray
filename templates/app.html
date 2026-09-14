@@ -4,6 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Ravo X-Ray</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 32 32%27%3E%3Crect width=%2732%27 height=%2732%27 rx=%277%27 fill=%27%2313212b%27/%3E%3Crect x=%275%27 y=%2712%27 width=%2714%27 height=%278%27 rx=%271.5%27 fill=%27%23d08416%27/%3E%3Crect x=%2720%27 y=%2712%27 width=%277%27 height=%278%27 rx=%271.5%27 fill=%27%23e4eef2%27/%3E%3C/svg%3E">
   <meta name="robots" content="noindex, nofollow">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -102,7 +103,7 @@
       <ul class="plug-list">
         <li class="plug">
           <h3>The cache</h3>
-          <p>One Redis lookup before the embedding call. Ravo already runs Redis, so a repeated question skips about half a second.</p>
+          <p>One Redis lookup before the embedding call. Ravo already runs Redis, so a repeated question skips that call entirely: 164 ms from this server, over half a second on a slower connection.</p>
         </li>
         <li class="plug">
           <h3>The x-ray</h3>

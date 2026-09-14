@@ -206,7 +206,7 @@ def test_citation_snippet_truncated_to_30_words(monkeypatch):
         {
             "title": "Return Policy",
             "chunk_index": 2,
-            "snippet": " ".join(f"word{i}" for i in range(30)) + " …",
+            "snippet": "… " + " ".join(f"word{i}" for i in range(30)) + " …",
             "similarity": 0.9,
         }
     ]
@@ -219,3 +219,12 @@ def test_citation_snippet_truncated_to_30_words(monkeypatch):
     ]
     # The model reads the whole passage (parts numbered from 1); only the UI snippet is cut.
     assert _tool_messages(client)[0]["content"] == f"[Return Policy, part 3] {content}"
+
+def test_weak_citations_are_dropped():
+    citations = [
+        {"title": "faq.pdf", "chunk_index": 2, "snippet": "delivery", "similarity": 0.62},
+        {"title": "faq.pdf", "chunk_index": 1, "snippet": "ordering", "similarity": 0.58},
+        {"title": "safety_manual.pdf", "chunk_index": 3, "snippet": "gloves", "similarity": 0.41},
+    ]
+    kept = assistant._relevant_citations(citations)
+    assert [c["snippet"] for c in kept] == ["delivery", "ordering"]
