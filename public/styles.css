@@ -227,6 +227,18 @@ a { color: var(--ink); text-underline-offset: 3px; }
 .btn-quiet { background: transparent; color: var(--ink); border: 1.5px solid var(--rule); }
 .limit-note { font-size: var(--step--1); color: var(--muted); margin: 0; }
 
+/* voice call bar: a strip of film, like the x-ray it sits above */
+.voice-bar {
+  display: flex; align-items: center; gap: 0.7rem;
+  background: var(--film); color: var(--bone); border: 1px solid var(--film-edge);
+  border-radius: 10px; padding: 0.5rem 0.55rem 0.5rem 0.9rem;
+}
+.voice-dot { width: 0.65rem; height: 0.65rem; border-radius: 50%; background: var(--glow); flex: none; animation: voice-pulse 1.6s ease-in-out infinite; }
+@keyframes voice-pulse { 0%, 100% { opacity: 0.35; } 50% { opacity: 1; } }
+.voice-status { font-weight: 700; }
+.voice-timer { margin-left: auto; color: var(--bone-dim); }
+.voice-bar .btn-quiet { color: var(--bone); border-color: var(--film-edge); padding: 0.45rem 0.85rem; width: auto; }
+
 /* ---------- reading guide ---------- */
 .guide { display: grid; gap: 1rem; }
 .guide h2 { font-size: var(--step-1); margin: 0; line-height: 1.25; }

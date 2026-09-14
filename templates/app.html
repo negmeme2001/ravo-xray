@@ -40,7 +40,14 @@
         <form class="ask" id="ask-form" autocomplete="off">
           <input id="ask-input" name="q" maxlength="500" aria-label="Your question" placeholder="Ask about products, prices, returns, delivery…" required>
           <button class="btn" id="ask-button" type="submit">Ask</button>
+          <button class="btn btn-quiet" id="talk-button" type="button" hidden>Talk</button>
         </form>
+        <div class="voice-bar" id="voice-bar" hidden>
+          <span class="voice-dot" aria-hidden="true"></span>
+          <span class="voice-status" id="voice-status" role="status">Connecting…</span>
+          <span class="voice-timer num" id="voice-timer">3:00</span>
+          <button class="btn btn-quiet" id="voice-end" type="button">End call</button>
+        </div>
         <p class="limit-note" id="limit-note" hidden></p>
       </div>
     </main>
@@ -55,6 +62,7 @@
         <li><span class="swatch sw-hot"></span><span><b>Amber</b> marks the step that cost the most.</span></li>
       </ul>
       <p>Ask the same question twice and watch the second band shrink.</p>
+      <p id="voice-hint" hidden>Prefer to speak? Press <b>Talk</b>. The same assistant answers out loud, using the same search and the same cache.</p>
     </aside>
   </div>
 
