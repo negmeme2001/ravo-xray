@@ -5,6 +5,8 @@ where that answer's time went. Built to show three additions to a Ravo-style ret
 
 - **Faster**: a Redis query-embedding cache, plus a per-turn latency trace.
 - **Measurable**: a labelled eval set that scores every search setup.
+- **Spoken too**: press Talk and the same assistant answers out loud (LiveKit Cloud agent,
+  streaming speech recognition), using the same search and cache.
 - **Honest about failures**: known weak spots (negation, near-duplicates) are kept on the
   scoreboard as the targets for the next improvements.
 
@@ -39,6 +41,8 @@ Browser ─► FastAPI on Vercel (fra1) ─► ravo_core
 
 - `app.py`: access-code gate (HMAC-signed cookie), `/api/chat`, `/api/eval`, `/api/health`.
 - `templates/app.html`, `public/`: the page. Plain HTML, CSS and JavaScript.
+- `agent/`: the LiveKit voice agent (Deepgram Flux speech recognition and Cartesia Sonic 3 speech through
+  LiveKit Inference, with an OpenAI fallback voice), deployed to LiveKit Cloud with the `Dockerfile`.
 - `seed/`: generates and loads the catalog and documents.
 - `eval/`: `testset.json` (31 product and 17 document questions with checkable answers),
   `run_eval.py` (scores setups and writes `results.json`), `metrics.py`.
@@ -77,6 +81,6 @@ uv run python -m eval.run_eval    # re-ingests each setup, scores it, writes eva
 2. Hybrid keyword + vector search in the same Postgres (brand and exact-name queries).
 3. Collapse near-duplicates in search results (raises variety in the top 5).
 4. Rewrite negated questions before searching (the negation rows).
-5. Voice: the same assistant spoken, with streaming speech recognition.
+5. An x-ray for spoken answers: add speech recognition and synthesis to the timing breakdown.
 
 Built by Mohamed Negm.
