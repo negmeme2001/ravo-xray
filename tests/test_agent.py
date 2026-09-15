@@ -1,4 +1,5 @@
 import asyncio
+import types
 
 import pytest
 
@@ -84,6 +85,50 @@ def test_search_documents_text_uses_render_documents(monkeypatch):
 
     assert text == assistant.render_documents(documents)
     assert timing == {"embed_ms": 0.0, "cache": "off", "search_ms": 0.0}
+
+
+_WEAK_ITEMS = [
+    {"code": "P1", "name": "Beyti Insulated Cooler Bag", "category": "Household", "price_egp": 400.0, "stock": 6, "similarity": 0.25},
+    {"code": "P2", "name": "Generic Headache Relief Gel", "category": "Pain Relief", "price_egp": 88.0, "stock": 12, "similarity": 0.23},
+]
+_CONFIDENT_ITEMS = [
+    {"code": "P1", "name": "Almarai Milk", "category": "Dairy", "price_egp": 25.5, "stock": 10, "similarity": 0.62},
+]
+
+
+def _install_search_tool(monkeypatch, items):
+    timing = {"embed_ms": 1.0, "cache": "miss", "search_ms": 2.0}
+    monkeypatch.setattr(
+        tools,
+        "search_products",
+        lambda query, k=5, in_stock_only=False: {"items": items, "timing": timing},
+    )
+    sent = []
+    async def fake_send(session, topic, payload):
+        sent.append((topic, payload))
+
+    monkeypatch.setattr(agent, "_send_json", fake_send)
+    store = agent.StoreAgent()
+    store._activity = types.SimpleNamespace(session=None)
+    return store, sent, timing
+
+
+def test_search_products_with_only_weak_matches_sends_no_cards(monkeypatch):
+    store, sent, _ = _install_search_tool(monkeypatch, _WEAK_ITEMS)
+
+    text = asyncio.run(store.search_products("laptop"))
+
+    assert text == assistant.render_products(_WEAK_ITEMS)
+    assert sent == []
+    assert [lookup["tool"] for lookup in store.turn_lookups] == ["search_products"]
+
+
+def test_search_products_sends_cards_when_a_match_is_confident(monkeypatch):
+    store, sent, timing = _install_search_tool(monkeypatch, _CONFIDENT_ITEMS)
+
+    asyncio.run(store.search_products("milk"))
+
+    assert sent == [(agent.CARDS_TOPIC, agent.build_cards_payload(_CONFIDENT_ITEMS, timing))]
 
 _USER = {"stopped_speaking_at": 100.0, "end_of_turn_delay": 0.4}
 

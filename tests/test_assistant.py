@@ -250,3 +250,59 @@ def test_same_named_products_collapse_to_the_best_match(monkeypatch):
     assert [c["code"] for c in result["cards"]] == ["P1", "P2"]
     model_view = _tool_messages(client)[0]["content"]
     assert "213.34" in model_view and "34.35" not in model_view
+
+
+def test_product_type_strips_the_brand():
+    assert assistant.product_type("Beyti Insulated Cooler Bag") == "Insulated Cooler Bag"
+    assert assistant.product_type("Almarai Milk") == "Milk"
+    assert assistant.product_type("Yogurt") == "Yogurt"
+
+
+def test_cards_to_show_keeps_confident_and_named_cards():
+    cards = [
+        {"code": "P1", "name": "Almarai Milk", "category": "Dairy", "price_egp": 25.5, "stock": 10, "similarity": 0.62},
+        {"code": "P2", "name": "Juhayna Yogurt", "category": "Dairy", "price_egp": 18.0, "stock": 4, "similarity": 0.23},
+        {"code": "P3", "name": "Beyti Insulated Cooler Bag", "category": "Household", "price_egp": 400.0, "stock": 6, "similarity": 0.25},
+    ]
+
+    assert [c["code"] for c in assistant.cards_to_show(cards, "Try the YOGURT.")] == ["P1", "P2"]
+    assert [c["code"] for c in assistant.cards_to_show(cards, "Try the insulated cooler bag.")] == ["P1", "P3"]
+
+
+def test_prompt_rejects_unrelated_products():
+    assert "offer something else" not in assistant.BASE_RULES
+    assert "doesn't sell" in assistant.BASE_RULES
+
+
+def test_weak_search_results_unnamed_in_reply_yield_no_cards(monkeypatch):
+    items = [
+        {"code": "P1", "name": "Beyti Insulated Cooler Bag", "category": "Household", "price_egp": 400.0, "stock": 6, "similarity": 0.25},
+        {"code": "P2", "name": "Generic Headache Relief Gel", "category": "Pain Relief", "price_egp": 88.0, "stock": 12, "similarity": 0.23},
+    ]
+    _search_products(items, monkeypatch)
+    client = _install_client(
+        monkeypatch,
+        [
+            _Response(tool_calls=[_ToolCall("call-1", "search_products", '{"query": "laptop"}')]),
+            _Response(content="We don't sell laptops."),
+        ],
+    )
+
+    result = assistant.run_turn([{"role": "user", "content": "do you have laptops?"}])
+
+    assert result["cards"] == []
+    assert result["reply"] == "We don't sell laptops."
+
+
+def _product(name, similarity):
+    return {"name": name, "category": "Household", "price_egp": 10.0, "stock": 5, "similarity": similarity}
+
+
+def test_render_products_flags_weak_results():
+    text = assistant.render_products([_product("Beyti Insulated Cooler Bag", 0.25)])
+    assert text.startswith(assistant.WEAK_MATCH_NOTE)
+
+
+def test_render_products_leaves_confident_results_alone():
+    text = assistant.render_products([_product("Domty Oat Milk", 0.68), _product("Beyti Cooler Bag", 0.2)])
+    assert assistant.WEAK_MATCH_NOTE not in text

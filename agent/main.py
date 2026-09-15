@@ -150,7 +150,8 @@ class StoreAgent(Agent):
         started_at = time.time()
         text, items, timing = await _search_products(query)
         self.turn_lookups.append({"tool": "search_products", "started_at": started_at, "timing": timing})
-        await _send_json(self.session, CARDS_TOPIC, build_cards_payload(items, timing))
+        if any(item["similarity"] >= assistant.CONFIDENT_MATCH for item in items):
+            await _send_json(self.session, CARDS_TOPIC, build_cards_payload(items, timing))
         return text
 
     @function_tool

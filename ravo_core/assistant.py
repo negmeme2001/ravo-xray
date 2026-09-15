@@ -15,8 +15,14 @@ BASE_RULES = (
     "recommend only products it returns. Never suggest items from general knowledge "
     "that the search did not return, and never ask permission to search: just search. "
     "Use search_documents for store policies, returns, opening hours, delivery, "
-    "parking, payment and staff safety. Never invent products, prices or policies: "
-    "if the tools return nothing relevant, say so plainly and offer something else. "
+    "parking, payment and staff safety. Never invent products, prices or policies. "
+    "Recommend a product only if it is what the shopper asked for or clearly meets "
+    "the same need, like frozen fish when asked for fresh fish. If the search returns "
+    "nothing that does, say plainly that the store doesn't sell it and mention what "
+    "the store does carry (bakery, beverages, cleaning, dairy, frozen food, household, "
+    "pain relief and snacks), and suggest no product: an item that only shares a word "
+    "or a loose link with the request, like a lunch box for someone asking for a "
+    "microwave, is not an alternative. "
     "Prices are in EGP. Product cards are shown to the shopper separately, so mention "
     "at most the one or two best matches by name and price instead of listing "
     "everything. When answering from a document, say which document it comes from."
@@ -74,6 +80,13 @@ TOOLS = [
 SNIPPET_WORDS = 30
 MAX_CARDS = 6
 MAX_CITATIONS = 3
+# A card at or above this similarity is a sure match; below it, a card shows
+# only when the reply names the product.
+CONFIDENT_MATCH = 0.45
+WEAK_MATCH_NOTE = (
+    "None of these is a close match. If none is what the shopper asked for, the "
+    "store doesn't sell it: say so and suggest no product."
+)
 # Only cite passages nearly as relevant as the best one; weaker ones are noise
 # (a staff-safety passage under a delivery answer, for example).
 CITATION_SIMILARITY_MARGIN = 0.08
@@ -89,6 +102,20 @@ def unique_by_name(items: list[dict]) -> list[dict]:
             seen.add(item["name"])
             unique.append(item)
     return unique
+
+
+def product_type(name: str) -> str:
+    parts = name.split()
+    return name if len(parts) == 1 else " ".join(parts[1:])
+
+
+def cards_to_show(cards: list[dict], reply: str) -> list[dict]:
+    reply_lower = reply.lower()
+    return [
+        card
+        for card in cards
+        if card["similarity"] >= CONFIDENT_MATCH or product_type(card["name"]).lower() in reply_lower
+    ]
 
 
 def _llm_step(label: str, ms: float) -> dict:
@@ -121,13 +148,19 @@ def _stock_text(stock: int) -> str:
 def render_products(items: list[dict]) -> str:
     if not items:
         return "No matching results."
-    return "\n".join(
+    lines = "\n".join(
         (
             f"{item['name']} | {item['category']} | {item['price_egp']} EGP | "
             f"{_stock_text(item['stock'])} | {item['similarity']}"
         )
         for item in items
     )
+    # Vector search always returns its nearest products, however far off; say so
+    # when nothing is close, or the model pitches the nearest thing (a cooler bag
+    # for a laptop).
+    if all(item["similarity"] < CONFIDENT_MATCH for item in items):
+        return WEAK_MATCH_NOTE + "\n" + lines
+    return lines
 
 
 def render_documents(items: list[dict]) -> str:
@@ -266,7 +299,7 @@ def run_turn(messages: list[dict]) -> dict:
 
     return {
         "reply": reply,
-        "cards": list(cards.values())[:MAX_CARDS],
+        "cards": cards_to_show(list(cards.values()), reply)[:MAX_CARDS],
         "citations": _relevant_citations(citations),
         "trace": {"steps": steps, "total_ms": round(total.ms, 1)},
     }
