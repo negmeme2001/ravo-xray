@@ -120,7 +120,7 @@ def test_voice_token_returns_jwt_with_room_and_agent(client, voice_env):
 
 def test_voice_token_rate_limited_per_ip(client, voice_env):
     _login(client)
-    for _ in range(10):
+    for _ in range(app_module.VOICE_PER_IP_LIMIT):
         res = client.post("/api/voice/token")
         assert res.status_code == 200
     res = client.post("/api/voice/token")

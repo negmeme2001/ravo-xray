@@ -145,7 +145,7 @@ def test_21st_turn_in_conversation_rejected(client):
 
 def test_per_ip_chat_limit(client):
     _login(client)
-    for i in range(60):
+    for i in range(app_module.CHAT_PER_IP_LIMIT):
         res = client.post("/api/chat", json=_chat_body(conversation_id=f"c{i}"))
         assert res.status_code == 200
     res = client.post("/api/chat", json=_chat_body(conversation_id="fresh"))

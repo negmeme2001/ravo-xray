@@ -31,8 +31,12 @@ CONVERSATION_TURN_LIMIT = 20
 MAX_USER_CHARS = 500
 MAX_ASSISTANT_CHARS = 2000
 
+# Per-network limits: an office shares one public IP, so these are sized for a
+# team trying the demo together. The access code keeps strangers out and each
+# voice call ends after three minutes.
+CHAT_PER_IP_LIMIT = 150
 VOICE_ROOM_TTL_MINUTES = 10
-VOICE_PER_IP_LIMIT = 10
+VOICE_PER_IP_LIMIT = 40
 VOICE_PER_IP_WINDOW_SECONDS = 3600
 VOICE_AGENT_NAME = "ravo-xray"
 
@@ -201,7 +205,7 @@ def chat(request: Request, payload: dict = Body(...), _: None = Depends(require_
     messages = payload["messages"][-10:]
     ip = _client_ip(request)
 
-    if not allow(f"chat:{ip}", 60, 3600):
+    if not allow(f"chat:{ip}", CHAT_PER_IP_LIMIT, 3600):
         raise HTTPException(
             status_code=429,
             detail={"error": "Too many questions from this network. Try again in an hour."},
