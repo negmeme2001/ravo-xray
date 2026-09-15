@@ -32,6 +32,16 @@ class FakeRedis:
     def expire(self, key, seconds):
         return key in self.data
 
+    def lpush(self, key, value):
+        self.data.setdefault(key, []).insert(0, value)
+        return 0
+
+    def ltrim(self, key, start, stop):
+        self.data[key] = self.data.get(key, [])[start : stop + 1]
+
+    def lrange(self, key, start, stop):
+        return self.data.get(key, [])[start : stop + 1]
+
 
 CANNED_RESULT = {
     "reply": "Almarai Milk is 25.5 EGP.",
@@ -243,3 +253,33 @@ def test_root_redirects_when_session_secret_missing(client, monkeypatch):
     resp = client.get("/", follow_redirects=False)
     assert resp.status_code == 303
     assert resp.headers["location"] == "/login.html"
+
+
+def test_monitor_requires_session(client):
+    res = client.get("/api/monitor")
+    assert res.status_code == 401
+    assert res.json() == {"error": "Enter the access code first."}
+
+
+def test_monitor_returns_turns_and_summary(client):
+    _login(client)
+    res = client.get("/api/monitor")
+    assert res.status_code == 200
+    assert res.headers["cache-control"] == "no-store"
+    body = res.json()
+    assert body["turns"] == []
+    assert body["summary"]["typed"] == 0
+    assert body["summary"]["spoken"] == 0
+
+
+def test_chat_turn_adds_monitor_entry(client):
+    _login(client)
+    res = client.post("/api/chat", json=_chat_body())
+    assert res.status_code == 200
+    assert isinstance(res.json()["monitor_id"], str)
+
+    turns = client.get("/api/monitor").json()["turns"]
+    assert len(turns) == 1
+    assert turns[0]["total_ms"] == 0.0
+    assert turns[0]["cache"] is None
+    assert turns[0]["spoken"] is False

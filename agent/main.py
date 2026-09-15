@@ -18,7 +18,7 @@ from livekit.agents import (
 from livekit.agents import tts as agents_tts
 from livekit.plugins import openai, silero
 
-from ravo_core import assistant, tools
+from ravo_core import assistant, monitor, tools
 
 AGENT_NAME = "ravo-xray"
 SESSION_LIMIT_SECONDS = 180
@@ -129,6 +129,16 @@ async def _send_json(session: AgentSession, topic: str, payload: dict) -> None:
         logger.exception("could not send %s to the room", topic)
 
 
+async def _publish_trace(session: AgentSession, trace: dict) -> None:
+    """Record the trace in the live monitor, then send it; never block the turn."""
+    try:
+        trace["monitor_id"] = await asyncio.to_thread(monitor.record, trace)
+    except Exception:
+        logger.warning("monitor: record failed for a voice turn", exc_info=True)
+        trace["monitor_id"] = None
+    await _send_json(session, TRACE_TOPIC, trace)
+
+
 class StoreAgent(Agent):
     def __init__(self) -> None:
         super().__init__(instructions=VOICE_PROMPT)
@@ -201,7 +211,7 @@ async def entrypoint(ctx: JobContext) -> None:
             turn["user_metrics"] = None
             agent.turn_lookups = []
             if trace is not None:
-                asyncio.create_task(_send_json(session, TRACE_TOPIC, trace))
+                asyncio.create_task(_publish_trace(session, trace))
 
     await session.start(agent=agent, room=ctx.room)
     asyncio.create_task(_say_goodbye_after_limit(session, ctx))

@@ -128,3 +128,36 @@ def test_voice_trace_skips_a_negative_decide_step():
 
 def test_no_voice_trace_without_measured_latency():
     assert agent.build_voice_trace(_USER, {"llm_node_ttft": 0.5}, []) is None
+
+
+def test_publish_trace_records_monitor_id(monkeypatch):
+    sent = {}
+
+    async def fake_send(session, topic, payload):
+        sent["payload"] = payload
+
+    monkeypatch.setattr(agent, "_send_json", fake_send)
+    monkeypatch.setattr(agent.monitor, "record", lambda trace: "abc")
+
+    trace = {"steps": [], "total_ms": 1.0, "spoken": True}
+    asyncio.run(agent._publish_trace(None, trace))
+
+    assert sent["payload"]["monitor_id"] == "abc"
+
+
+def test_publish_trace_sends_when_monitor_fails(monkeypatch):
+    sent = {}
+
+    async def fake_send(session, topic, payload):
+        sent["payload"] = payload
+
+    def boom(trace):
+        raise RuntimeError("redis down")
+
+    monkeypatch.setattr(agent, "_send_json", fake_send)
+    monkeypatch.setattr(agent.monitor, "record", boom)
+
+    trace = {"steps": [], "total_ms": 1.0, "spoken": True}
+    asyncio.run(agent._publish_trace(None, trace))
+
+    assert sent["payload"]["monitor_id"] is None

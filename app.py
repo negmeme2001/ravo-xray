@@ -18,7 +18,7 @@ from fastapi import Body, Depends, FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from livekit.api import AccessToken, RoomAgentDispatch, RoomConfiguration, VideoGrants
 
-from ravo_core import assistant, tools
+from ravo_core import assistant, monitor, tools
 from ravo_core.embed_cache import get_redis
 from ravo_core.limits import allow
 
@@ -230,8 +230,18 @@ def chat(request: Request, payload: dict = Body(...), _: None = Depends(require_
             detail={"error": "The assistant couldn't answer just now. Try again in a moment."},
         )
 
+    result["monitor_id"] = monitor.record(result["trace"])
     result["turns_left"] = max(0, CONVERSATION_TURN_LIMIT - _conv_count(conv_key))
     return result
+
+
+@app.get("/api/monitor")
+def live_monitor(_: None = Depends(require_session)):
+    turns = monitor.recent()
+    return JSONResponse(
+        {"turns": turns, "summary": monitor.summary(turns)},
+        headers={"Cache-Control": "no-store"},
+    )
 
 
 @app.get("/api/eval")
