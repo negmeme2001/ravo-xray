@@ -10,6 +10,12 @@ let starters = [];
 let note;
 let scoreboard;
 let failsList;
+let scoreboardLede;
+let plugCount;
+let nextMedian;
+let nextNegation;
+let nextDiversity;
+let nextHit1;
 
 let conversationId = crypto.randomUUID();
 let messages = [];
@@ -65,6 +71,46 @@ function formatDate(iso) {
   const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
   const date = new Date(iso);
   return date.getUTCDate() + " " + months[date.getUTCMonth()] + " " + date.getUTCFullYear();
+}
+
+const KIND_LABELS = { semantic: "Meaning", negation: "Negation", brand: "Brand", direct: "Direct" };
+const PRODUCT_COLUMNS = [
+  { key: "hit_at_1", header: "Right answer first", format: formatRate, direction: "high" },
+  { key: "hit_at_5", header: "Right answer in top 5", format: formatRate, direction: "high" },
+  { key: "mrr", header: "Rank score (MRR)", format: formatMRR, direction: "high" },
+  { key: "diversity_at_5", header: "Variety in top 5", format: formatVariety, direction: "high" },
+  { key: "p50_search_ms", header: "Search time", format: formatTime, direction: "low" },
+];
+const DOCUMENT_COLUMNS = [
+  { key: "hit_at_1", header: "Right answer first", format: formatRate, direction: "high" },
+  { key: "hit_at_3", header: "Right answer in top 3", format: formatRate, direction: "high" },
+  { key: "mrr", header: "Rank score (MRR)", format: formatMRR, direction: "high" },
+  { key: "p50_search_ms", header: "Search time", format: formatTime, direction: "low" },
+];
+
+function productionConfig(section) {
+  return (section.configs || []).find((cfg) => cfg.key === section.production_config) || null;
+}
+
+function configQuestionCount(config) {
+  if (!config || !config.by_tag) return 0;
+  return Object.values(config.by_tag).reduce((sum, bucket) => sum + (bucket.n || 0), 0);
+}
+
+function displayConfigName(cfg) {
+  return String(cfg.name)
+    .replace("chunks", "passages")
+    .replace("Name, category and description", "Name, category, description");
+}
+
+function typeOf(name) {
+  const parts = String(name).split(" ");
+  return parts.length > 1 ? parts.slice(1).join(" ") : String(name);
+}
+
+function countWord(count) {
+  const words = { 2: "two", 3: "three", 4: "four", 5: "five" };
+  return words[count] || String(count);
 }
 
 function scrollThread() {
@@ -358,28 +404,161 @@ function renderScoreboardSection(title, section, columns) {
 
 function renderScoreboard(data) {
   scoreboard.textContent = "";
+  const products = data.products || {};
+  const documents = data.documents || {};
 
-  const productColumns = [
-    { key: "hit_at_1", header: "Right answer first", format: formatRate, direction: "high" },
-    { key: "hit_at_5", header: "Right answer in top 5", format: formatRate, direction: "high" },
-    { key: "mrr", header: "Rank score (MRR)", format: formatMRR, direction: "high" },
-    { key: "diversity_at_5", header: "Variety in top 5", format: formatVariety, direction: "high" },
-    { key: "p50_search_ms", header: "Search time", format: formatTime, direction: "low" },
-  ];
-  const documentColumns = [
-    { key: "hit_at_1", header: "Right answer first", format: formatRate, direction: "high" },
-    { key: "hit_at_3", header: "Right answer in top 3", format: formatRate, direction: "high" },
-    { key: "mrr", header: "Rank score (MRR)", format: formatMRR, direction: "high" },
-    { key: "p50_search_ms", header: "Search time", format: formatTime, direction: "low" },
-  ];
+  const boards = document.createElement("div");
+  boards.className = "ev-boards";
+  boards.append(buildBoard("Products", products, [
+    { name: "Right answer first", key: "hit_at_1" },
+    { name: "Right answer in the top 5", key: "hit_at_5" },
+    { name: "Different products in the top 5", key: "diversity_at_5", variety: true },
+  ]));
+  boards.append(buildDocumentBoard(documents));
+  scoreboard.append(boards);
 
-  scoreboard.append(renderScoreboardSection("Products", data.products, productColumns));
-  scoreboard.append(renderScoreboardSection("Store documents", data.documents, documentColumns));
+  const foot = document.createElement("div");
+  foot.className = "ev-board-foot";
+  const measured = document.createElement("span");
+  measured.className = "ev-small";
+  measured.textContent = "Measured " + formatDate(data.generated_at) + " on a " + data.environment + ".";
+  foot.append(measured);
 
-  const lede = document.createElement("p");
-  lede.className = "lede";
-  lede.textContent = "Measured " + formatDate(data.generated_at) + " on a " + data.environment + ".";
-  scoreboard.append(lede);
+  const details = document.createElement("details");
+  details.className = "ev-full";
+  const summary = document.createElement("summary");
+  summary.textContent = "Full scores";
+  details.append(summary);
+  details.append(renderScoreboardSection("Products", products, PRODUCT_COLUMNS));
+  details.append(renderScoreboardSection("Store documents", documents, DOCUMENT_COLUMNS));
+  foot.append(details);
+  scoreboard.append(foot);
+
+  populateScoreboardNumbers(data);
+  populateNextNumbers(data);
+}
+
+function buildBoard(title, section, metrics) {
+  const board = document.createElement("div");
+  board.className = "ev-board";
+
+  const head = document.createElement("div");
+  head.className = "ev-board-head";
+  const heading = document.createElement("h3");
+  heading.textContent = title;
+  head.append(heading);
+  const count = document.createElement("span");
+  count.className = "num";
+  count.textContent = configQuestionCount(productionConfig(section)) + " questions";
+  head.append(count);
+  board.append(head);
+
+  const production = productionConfig(section);
+  const ordered = production
+    ? [production, ...section.configs.filter((cfg) => cfg !== production)]
+    : section.configs || [];
+
+  for (const metric of metrics) {
+    const wrap = document.createElement("div");
+    wrap.className = "ev-metric";
+    const name = document.createElement("div");
+    name.className = "ev-metric-name";
+    name.textContent = metric.name;
+    wrap.append(name);
+    for (const cfg of ordered) wrap.append(buildPair(cfg, section, metric));
+    board.append(wrap);
+  }
+  return board;
+}
+
+function buildDocumentBoard(section) {
+  const board = buildBoard("Store documents", section, [
+    { name: "Right passage first", key: "hit_at_1" },
+  ]);
+  const decided = document.createElement("p");
+  decided.className = "ev-decided";
+  const lead = document.createElement("b");
+  lead.textContent = "This score picked the passage size.";
+  decided.append(lead);
+  decided.append(
+    document.createTextNode(
+      " Only three documents, so read it as a direction; the product numbers carry the weight."
+    )
+  );
+  board.append(decided);
+  return board;
+}
+
+function buildPair(cfg, section, metric) {
+  const pair = document.createElement("div");
+  pair.className = "ev-pair";
+  const live = cfg.key === section.production_config;
+  if (live) pair.classList.add("ev-live");
+
+  const who = document.createElement("span");
+  who.className = "ev-who";
+  if (live) {
+    const strong = document.createElement("b");
+    strong.textContent = displayConfigName(cfg);
+    who.append(strong);
+    const chip = document.createElement("span");
+    chip.className = "ev-live-chip";
+    chip.textContent = "live";
+    who.append(chip);
+  } else {
+    who.textContent = displayConfigName(cfg);
+  }
+  pair.append(who);
+
+  const bar = document.createElement("div");
+  bar.className = "ev-bar";
+  const fill = document.createElement("i");
+  fill.style.width = metricWidth(cfg, section, metric) + "%";
+  bar.append(fill);
+  pair.append(bar);
+
+  const value = document.createElement("span");
+  value.className = "ev-v num";
+  value.textContent = metric.variety
+    ? formatVariety(cfg.metrics[metric.key], section.k)
+    : formatRate(cfg.metrics[metric.key]);
+  pair.append(value);
+  return pair;
+}
+
+function metricWidth(cfg, section, metric) {
+  const value = cfg.metrics[metric.key] || 0;
+  const ratio = metric.variety ? value / section.k : value;
+  return Math.round(ratio * 100 * 10) / 10;
+}
+
+function populateScoreboardNumbers(data) {
+  const products = (data && data.products) || {};
+  const documents = (data && data.documents) || {};
+  const total =
+    configQuestionCount(productionConfig(products)) + configQuestionCount(productionConfig(documents));
+  scoreboardLede.textContent =
+    total + " shopper questions with a known right answer, run against every version of the search.";
+  plugCount.textContent = total + " questions per release";
+}
+
+function populateNextNumbers(data) {
+  const products = (data && data.products) || {};
+  const live = productionConfig(products);
+  if (!live) return;
+  const metrics = live.metrics || {};
+  const byTag = live.by_tag || {};
+  const negation = byTag.negation;
+  if (negation && negation.n) {
+    nextNegation.textContent = Math.round(negation.hit_at_5 * negation.n) + " of " + negation.n;
+    nextNegation.classList.toggle("bad", negation.hit_at_5 < 0.5);
+  }
+  if (metrics.diversity_at_5 != null && products.k) {
+    nextDiversity.textContent = formatVariety(metrics.diversity_at_5, products.k);
+  }
+  if (metrics.hit_at_1 != null) {
+    nextHit1.textContent = formatRate(metrics.hit_at_1);
+  }
 }
 
 function formatMRR(value) {
@@ -394,28 +573,51 @@ function formatTime(value) {
   return formatMs(value) + " ms";
 }
 
-function failItem(failure, emptyText) {
-  const li = document.createElement("li");
-  li.className = "fail";
-  if (!failure) {
-    const q = document.createElement("div");
-    q.className = "q";
-    q.textContent = emptyText;
-    li.append(q);
-    return li;
+function boldEl(text) {
+  const b = document.createElement("b");
+  b.textContent = text;
+  return b;
+}
+
+function buildGotLine(failure) {
+  const got = document.createElement("span");
+  got.className = "ev-got";
+  const names = failure.top || [];
+  if (!names.length) {
+    got.textContent = "Got nothing back";
+    return got;
   }
-  const tag = document.createElement("span");
-  tag.className = "tag";
-  tag.textContent = capitalize(failure.tag);
-  li.append(tag);
-  const q = document.createElement("div");
-  q.className = "q";
-  q.textContent = "\u201C" + failure.query + "\u201D";
-  li.append(q);
-  const why = document.createElement("div");
-  why.className = "why";
-  why.textContent = "Top results: " + (failure.top || []).join(", ");
-  li.append(why);
+  const types = names.map(typeOf);
+  const word = countWord(names.length);
+  got.append(document.createTextNode("Got "));
+  if (names.every((name) => name === names[0])) {
+    got.append(boldEl(types[0]), document.createTextNode(" " + word + " times"));
+  } else if (types.every((type) => type === types[0])) {
+    got.append(boldEl(types[0]), document.createTextNode(" from " + word + " brands"));
+  } else {
+    types.forEach((type, index) => {
+      if (index > 0) got.append(document.createTextNode(", "));
+      got.append(boldEl(type));
+    });
+  }
+  return got;
+}
+
+function failItem(failure) {
+  const li = document.createElement("li");
+  li.className = "ev-miss";
+
+  const kind = document.createElement("span");
+  kind.className = "ev-kind";
+  kind.textContent = KIND_LABELS[failure.tag] || capitalize(failure.tag);
+  li.append(kind);
+
+  const asked = document.createElement("span");
+  asked.className = "ev-asked";
+  asked.textContent = "\u201C" + failure.query + "\u201D";
+  li.append(asked);
+
+  li.append(buildGotLine(failure));
   return li;
 }
 
@@ -423,11 +625,17 @@ function renderFails(data) {
   failsList.textContent = "";
   const failures = [];
   for (const section of [data.products, data.documents]) {
-    const live = (section.configs || []).find((cfg) => cfg.key === section.production_config);
+    const live = productionConfig(section);
     if (live) failures.push(...(live.failures || []));
   }
   if (!failures.length) {
-    failsList.append(failItem(null, "No failing questions."));
+    const li = document.createElement("li");
+    li.className = "ev-miss";
+    const note = document.createElement("span");
+    note.className = "ev-got";
+    note.textContent = "No failing questions.";
+    li.append(note);
+    failsList.append(li);
     return;
   }
   for (const failure of failures) failsList.append(failItem(failure));
@@ -1021,6 +1229,7 @@ function renderMonitor(data) {
   const summary = data.summary || {};
   const turns = monShownTurns(data);
   const empty = turns.length === 0;
+  nextMedian.textContent = formatDuration(summary.median_total_ms);
 
   monEmpty.hidden = !empty;
   if (empty) {
@@ -1103,6 +1312,12 @@ function init() {
   note = document.getElementById("limit-note");
   scoreboard = document.getElementById("scoreboard");
   failsList = document.getElementById("scoreboard-fails");
+  scoreboardLede = document.getElementById("scoreboard-lede");
+  plugCount = document.getElementById("plug-count");
+  nextMedian = document.getElementById("next-median");
+  nextNegation = document.getElementById("next-negation");
+  nextDiversity = document.getElementById("next-diversity");
+  nextHit1 = document.getElementById("next-hit1");
 
   monCount = document.getElementById("mon-count");
   monTotal = document.getElementById("mon-total");

@@ -272,14 +272,85 @@ th { font-weight: 700; color: var(--muted); white-space: nowrap; }
 tr:last-child td { border-bottom: 0; }
 td.metric { font-variant-numeric: tabular-nums; white-space: nowrap; }
 td.best { font-weight: 800; }
-.fail-list { display: grid; gap: 0.5rem; margin: 0; padding: 0; list-style: none; }
-.fail {
-  border-left: 3px solid var(--bad); background: var(--sheet); padding: 0.55rem 0.8rem;
-  border-radius: 0 var(--radius-small) var(--radius-small) 0; font-size: 0.95rem;
+
+/* ---------- evidence sections ---------- */
+/* a bar the width of the score, and a number the width of four digits */
+.ev-boards { display: grid; gap: 1rem; grid-template-columns: minmax(0, 1fr); }
+@media (min-width: 860px) { .ev-boards { grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr); } }
+.ev-board {
+  background: var(--sheet); border: 1px solid var(--rule); border-radius: var(--radius-small);
+  padding: 1rem 1.1rem 1.1rem; display: grid; gap: 1rem; align-content: start;
 }
-.fail .q { font-weight: 700; }
-.fail .why { color: var(--muted); }
-.tag { font-size: var(--step--1); font-weight: 700; color: var(--bad); }
+.ev-board-head { display: flex; justify-content: space-between; align-items: baseline; gap: 1rem; flex-wrap: wrap; }
+.ev-board h3 { margin: 0; font-size: var(--step-1); }
+.ev-board-head span { font-size: var(--step--1); color: var(--muted); }
+.ev-metric { display: grid; gap: 0.35rem; }
+.ev-metric-name { font-size: var(--step--1); font-weight: 700; }
+.ev-pair { display: grid; grid-template-columns: minmax(7rem, 15rem) minmax(0, 1fr) 3.6rem; align-items: center; gap: 0.3rem 0.75rem; }
+.ev-pair .ev-who { font-size: var(--step--1); color: var(--muted); }
+@media (max-width: 600px) { .ev-pair { grid-template-columns: minmax(0, 1fr) 4rem; } .ev-pair .ev-who { grid-column: 1 / -1; } }
+.ev-pair .ev-who b { color: var(--ink); font-weight: 700; }
+.ev-live-chip {
+  display: inline-block; margin-left: 0.35rem; font-size: 0.72rem; font-weight: 700;
+  color: var(--focus); border: 1px solid currentColor; border-radius: 999px; padding: 0 0.4rem; line-height: 1.4;
+}
+.ev-bar { height: 0.7rem; background: color-mix(in srgb, var(--rule) 55%, transparent); border-radius: 2px; overflow: hidden; }
+.ev-bar i { display: block; height: 100%; border-radius: 2px; background: var(--rule); }
+.ev-pair.ev-live .ev-bar i { background: var(--ink); }
+.ev-pair .ev-v { font-size: var(--step--1); text-align: right; color: var(--muted); }
+.ev-pair.ev-live .ev-v { color: var(--ink); font-weight: 800; }
+.ev-decided { font-size: var(--step--1); color: var(--muted); border-top: 1px solid var(--rule); padding-top: 0.75rem; margin: 0; }
+.ev-decided b { color: var(--ink); }
+.ev-board-foot { display: flex; flex-wrap: wrap; gap: 0.5rem 1.5rem; align-items: baseline; }
+details.ev-full summary { cursor: pointer; font-size: var(--step--1); font-weight: 700; color: var(--focus); }
+details.ev-full[open] summary { margin-bottom: 0.6rem; }
+.ev-small { color: var(--muted); font-size: var(--step--1); }
+
+/* still wrong: what was asked, next to what came back */
+.ev-wrong {
+  display: grid; gap: 0.6rem; grid-template-columns: repeat(auto-fill, minmax(min(100%, 21rem), 1fr));
+  margin: 0; padding: 0; list-style: none;
+}
+.ev-miss {
+  background: var(--sheet); border: 1px solid var(--rule); border-left: 3px solid var(--bad);
+  border-radius: var(--radius-small); padding: 0.7rem 0.9rem; display: grid; gap: 0.2rem;
+}
+.ev-miss .ev-asked { font-weight: 700; }
+.ev-miss .ev-got { font-size: var(--step--1); color: var(--muted); }
+.ev-miss .ev-got b { color: var(--ink); font-weight: 600; }
+.ev-kind { font-size: 0.75rem; font-weight: 700; color: var(--bad); }
+
+/* plugs into Ravo */
+.ev-plugs {
+  display: grid; gap: 0; grid-template-columns: minmax(0, 1fr); margin: 0; padding: 0;
+  list-style: none; border-top: 2px solid var(--ink);
+}
+@media (min-width: 760px) { .ev-plugs { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+.ev-plugs li { padding: 0.9rem 1.1rem 1rem 0; display: grid; gap: 0.3rem; align-content: start; border-bottom: 1px solid var(--rule); }
+@media (min-width: 760px) { .ev-plugs li { border-bottom: 0; } .ev-plugs li + li { padding-left: 1.1rem; border-left: 1px solid var(--rule); } }
+.ev-plugs h3 { margin: 0; font-size: var(--step-1); }
+.ev-plugs .ev-gain { font-size: var(--step-1); font-weight: 800; letter-spacing: -0.01em; }
+.ev-plugs p { color: var(--muted); font-size: 0.95rem; max-width: 34ch; margin: 0; }
+
+/* next: each fix beside the number it will move */
+.ev-road { margin: 0; padding: 0; list-style: none; display: grid; gap: 0; border-top: 1px solid var(--rule); counter-reset: step; }
+.ev-road li {
+  counter-increment: step; display: grid; gap: 0.25rem 1.25rem;
+  grid-template-columns: 2rem minmax(0, 1fr); padding-block: 0.9rem;
+  border-bottom: 1px solid var(--rule); align-items: baseline;
+}
+@media (min-width: 760px) { .ev-road li { grid-template-columns: 2rem minmax(0, 1fr) 16rem; } }
+.ev-road li::before { content: counter(step); font-weight: 800; color: var(--muted); font-variant-numeric: tabular-nums; }
+.ev-road .ev-what b { display: block; font-size: var(--step-1); line-height: 1.3; }
+.ev-road .ev-what span { color: var(--muted); font-size: 0.95rem; }
+.ev-now { grid-column: 2; display: flex; align-items: baseline; gap: 0.5rem; }
+@media (min-width: 760px) { .ev-now { grid-column: 3; justify-content: flex-end; text-align: right; } }
+.ev-now .ev-val { font-size: var(--step-1); font-weight: 800; white-space: nowrap; }
+.ev-now .ev-val.bad { color: var(--bad); }
+.ev-now .ev-lab { font-size: var(--step--1); color: var(--muted); }
+.ev-road-head { display: grid; grid-template-columns: 2rem minmax(0, 1fr) 16rem; font-size: var(--step--1); color: var(--muted); }
+.ev-road-head span:last-child { text-align: right; }
+@media (max-width: 759px) { .ev-road-head { display: none; } }
 
 /* ---------- live monitor ---------- */
 .mon-roll {
@@ -375,13 +446,6 @@ td.best { font-weight: 800; }
 .mon-verdict b { color: var(--bone); }
 
 .mon-caption { font-size: var(--step--1); color: var(--muted); margin: 0; }
-
-.plug-list { display: grid; gap: 1rem; margin: 0; padding: 0; list-style: none; }
-@media (min-width: 760px) { .plug-list { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
-.plug h3 { font-size: var(--step-1); margin: 0 0 0.3rem; }
-.plug p { color: var(--muted); margin: 0; }
-
-.next-list { margin: 0; padding-left: 1.2rem; display: grid; gap: 0.5rem; max-width: 64ch; }
 
 .footer { margin-top: 4rem; padding-top: 1.25rem; border-top: 1px solid var(--rule); color: var(--muted); font-size: var(--step--1); }
 

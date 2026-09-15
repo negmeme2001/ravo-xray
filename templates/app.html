@@ -105,40 +105,34 @@
 
     <section aria-labelledby="scoreboard-title">
       <h2 id="scoreboard-title">Every change to search gets a score</h2>
-      <p class="lede">A fixed set of shopper questions, each with a known right answer, run against every version of the search. This is what lets a team say "search got better" with a number instead of a feeling.</p>
+      <p class="lede" id="scoreboard-lede">…</p>
       <div id="scoreboard"><p class="lede">Loading the latest scores.</p></div>
-      <p style="color:var(--muted);margin:0;max-width:64ch">The scores already made one decision: store documents are split into 100-word passages because that setup puts the right passage first more often than 200-word ones. The document set is small (three documents), so that comparison is directional; the product set is where the numbers carry weight.</p>
-      <h3 style="margin:0.5rem 0 0">Questions it still gets wrong</h3>
-      <p style="color:var(--muted);margin:0">Kept on purpose. These are what the next improvements are measured against.</p>
-      <ul class="fail-list" id="scoreboard-fails"></ul>
+    </section>
+
+    <section aria-labelledby="wrong-title">
+      <h2 id="wrong-title">Still wrong, on purpose</h2>
+      <p class="lede">The next fixes are scored against these.</p>
+      <ul class="ev-wrong" id="scoreboard-fails"></ul>
     </section>
 
     <section aria-labelledby="plugs-title">
       <h2 id="plugs-title">How this plugs into Ravo</h2>
-      <ul class="plug-list">
-        <li class="plug">
-          <h3>The cache</h3>
-          <p>One Redis lookup before the embedding call. Ravo already runs Redis, so a repeated question skips that call entirely: 164 ms from this server, over half a second on a slower connection.</p>
-        </li>
-        <li class="plug">
-          <h3>The x-ray</h3>
-          <p>Timing around the embedding call, the search and each language-model call, written into the logging Ravo already has. The 3 seconds becomes a breakdown anyone can read. The same per-answer timings can feed the Prometheus and Grafana dashboards an operations team already watches.</p>
-        </li>
-        <li class="plug">
-          <h3>The scoreboard</h3>
-          <p>A labelled question set per store, run on every release. Search quality can be checked before it reaches a kiosk.</p>
-        </li>
+      <ul class="ev-plugs">
+        <li><h3>The cache</h3><span class="ev-gain num">164 ms → 3 ms</span><p>One Redis lookup before the embedding call, on every repeat question.</p></li>
+        <li><h3>The x-ray</h3><span class="ev-gain">Every answer, timed</span><p>Written into the logs Ravo already has, ready for Prometheus and Grafana.</p></li>
+        <li><h3>The scoreboard</h3><span class="ev-gain num" id="plug-count">…</span><p>A worse search is caught before it reaches a kiosk.</p></li>
       </ul>
     </section>
 
     <section aria-labelledby="next-title">
       <h2 id="next-title">What comes next</h2>
-      <ol class="next-list">
-        <li><b>One language-model call instead of two.</b> In this demo the model is about nine tenths of every answer: roughly 0.9 s deciding what to look up, then 0.9 s writing. Routing common questions straight to search, and streaming the reply so the kiosk starts speaking sooner, is the biggest remaining speed win.</li>
-        <li><b>Keyword and meaning together.</b> Hybrid search in the same Postgres, so exact brand and product names stop slipping. Measured by the brand questions above.</li>
-        <li><b>No more five copies of one product.</b> Collapse near-duplicates so the top results show real choices. Measured by result variety.</li>
-        <li><b>Understanding "not" and "without".</b> Rewrite negated questions before searching. Measured by the negation questions above.</li>
-        <li><b>Faster spoken turns.</b> Spoken answers carry the same x-ray. It showed the assistant waiting up to 2.5 s to be sure the shopper had finished; capping that wait at 1.2 s took a spoken turn from 3.5 s to 3.2 s. The saving was smaller than the cut because the model's first call had been running inside that wait, and it now shows as the next cost, which the one-call change above addresses.</li>
+      <div class="ev-road-head" aria-hidden="true"><span></span><span>The fix</span><span>The number it moves, today</span></div>
+      <ol class="ev-road">
+        <li><div class="ev-what"><b>One model call instead of two</b><span>Send common questions straight to search, and stream the reply.</span></div><div class="ev-now"><span class="ev-val num" id="next-median">–</span><span class="ev-lab">median answer, live</span></div></li>
+        <li><div class="ev-what"><b>Understand “not” and “without”</b><span>Rewrite negated questions before searching.</span></div><div class="ev-now"><span class="ev-val num" id="next-negation">–</span><span class="ev-lab">negation questions right</span></div></li>
+        <li><div class="ev-what"><b>Real choices in the top 5</b><span>Collapse near-duplicate products.</span></div><div class="ev-now"><span class="ev-val num" id="next-diversity">–</span><span class="ev-lab">different products</span></div></li>
+        <li><div class="ev-what"><b>Keyword and meaning together</b><span>Hybrid search in the same Postgres, so exact names land first.</span></div><div class="ev-now"><span class="ev-val num" id="next-hit1">–</span><span class="ev-lab">right answer first</span></div></li>
+        <li><div class="ev-what"><b>Faster spoken turns</b><span>Capping the wait for the shopper to finish took a spoken turn from 3.5 s to 3.2 s.</span></div><div class="ev-now"><span class="ev-val num" id="next-turn">3.2 s</span><span class="ev-lab">spoken turn</span></div></li>
       </ol>
     </section>
   </div>
