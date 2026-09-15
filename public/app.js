@@ -17,6 +17,19 @@ let turnCount = 0;
 let busy = false;
 let lastOpenFilm = null;
 
+let myAnswers = new Map();
+let monLatestMine = null;
+let monInspectedId = null;
+let monCount, monTotal, monCache, monChart, monFramesEl, monEmpty;
+let monInspectTitle, monInspectReadings, monBars, monVerdict, monRoll;
+let monInFlight = false;
+let monReloadQueued = false;
+let monPolling = null;
+let monVisible = false;
+let monFirstRender = true;
+let monPrevIds = new Set();
+const MONITOR_POLL_MS = 15000;
+
 function cloneTemplate(id) {
   const template = document.getElementById(id);
   return template.content.firstElementChild.cloneNode(true);
@@ -217,6 +230,8 @@ function renderReply(asstMsg, data) {
   }
 
   renderFilm(asstMsg.querySelector(".film"), data.trace);
+  noteMyAnswer(data.monitor_id);
+  loadMonitor();
 
   messages.push({ role: "assistant", content: data.reply });
 
@@ -588,6 +603,8 @@ async function handleVoiceTrace(stream) {
   const film = node.querySelector(".film");
   film.querySelector(".film-caption").textContent = "X-ray of this spoken answer";
   renderFilm(film, trace);
+  noteMyAnswer(trace.monitor_id);
+  loadMonitor();
   scrollThread();
 }
 
@@ -755,6 +772,327 @@ function markAssistantPresent() {
   if (voiceTimerId === null) startVoiceTimer();
 }
 
+/* ---------- live monitor ---------- */
+function formatDuration(ms) {
+  if (ms == null) return "–";
+  return ms >= 1000 ? (ms / 1000).toFixed(1) + " s" : Math.round(ms) + " ms";
+}
+
+function noteMyAnswer(id) {
+  if (!id) return;
+  myAnswers.set(id, turnCount);
+  monLatestMine = id;
+  monInspectedId = id;
+}
+
+function monShownTurns(data) {
+  const turns = data.turns || [];
+  const cap = window.matchMedia("(max-width: 520px)").matches ? 24 : turns.length;
+  return turns.slice(-cap);
+}
+
+function monScaleTop(turns) {
+  const totals = turns.map((turn) => turn.total_ms).sort((a, b) => a - b);
+  const p95 = totals[Math.floor(0.95 * (totals.length - 1))] || 3000;
+  return Math.max(1000, Math.ceil(p95 / 1000) * 1000);
+}
+
+function monDescribe(turn, index) {
+  const how = turn.spoken ? "Spoken answer" : "Typed answer";
+  const cache = turn.cache === "hit" ? ", question served from the cache" : "";
+  return how + " " + (index + 1) + ", " + formatDuration(turn.total_ms) + cache;
+}
+
+function renderMonitorGrid(turns) {
+  monChart.querySelectorAll(".mon-gridline").forEach((gridline) => gridline.remove());
+  if (!turns.length) return;
+  const top = monScaleTop(turns);
+  for (let s = 1000; s <= top; s += 1000) {
+    const gridline = document.createElement("div");
+    gridline.className = "mon-gridline";
+    gridline.style.bottom = (s / top) * 100 + "%";
+    const label = document.createElement("span");
+    label.className = "num";
+    label.textContent = s / 1000 + " s";
+    gridline.append(label);
+    monChart.prepend(gridline);
+  }
+}
+
+function renderMonitorFrames(turns) {
+  const framesEl = monFramesEl;
+  framesEl.textContent = "";
+  const entering = !monFirstRender && !REDUCED_MOTION.matches;
+  monFirstRender = false;
+  if (!turns.length) {
+    monPrevIds = new Set();
+    return;
+  }
+
+  const prevIds = monPrevIds;
+  const newIds = new Set();
+  const fresh = [];
+  const top = monScaleTop(turns);
+
+  turns.forEach((turn, index) => {
+    const frame = document.createElement("button");
+    frame.type = "button";
+    frame.className = "mon-frame";
+    frame.setAttribute("role", "listitem");
+    frame.dataset.id = turn.id;
+    frame.setAttribute("aria-label", monDescribe(turn, index));
+    if (turn.spoken) frame.classList.add("spoken");
+    const mine = myAnswers.get(turn.id);
+    if (mine) frame.classList.add("mine");
+    newIds.add(turn.id);
+
+    const stack = document.createElement("div");
+    stack.className = "mon-stack";
+    stack.style.height = Math.min(100, (turn.total_ms / top) * 100) + "%";
+    const parts = [
+      ["listen", turn.listen_ms],
+      ["search", turn.search_ms],
+      ["embed", turn.embed_ms],
+      ["llm", turn.llm_ms],
+      ["speak", turn.speak_ms],
+    ];
+    const sum = parts.reduce((acc, [, ms]) => acc + ms, 0) || 1;
+    for (const [kind, ms] of parts) {
+      if (!ms) continue;
+      const band = document.createElement("div");
+      band.className = "mon-band mon-b-" + kind;
+      band.style.flex = "0 0 " + (ms / sum) * 100 + "%";
+      stack.append(band);
+    }
+    const isOwnLatest = mine && turn.id === monLatestMine;
+    if (isOwnLatest) {
+      const marker = document.createElement("span");
+      marker.className = "marker mon-marker";
+      marker.textContent = "T" + mine;
+      stack.append(marker);
+    }
+    if (entering && !prevIds.has(turn.id)) {
+      frame.classList.add("entering");
+      fresh.push(frame);
+    }
+    frame.append(stack);
+
+    frame.addEventListener("mouseenter", () => inspectMonitorFrame(frame, turns));
+    frame.addEventListener("focus", () => inspectMonitorFrame(frame, turns));
+    frame.addEventListener("click", () => inspectMonitorFrame(frame, turns));
+    framesEl.append(frame);
+  });
+
+  monPrevIds = newIds;
+
+  if (fresh.length) {
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      for (const frame of fresh) frame.classList.remove("entering");
+    }));
+  }
+}
+
+function monReading(swatchClass, label, ms, tag) {
+  const reading = document.createElement("div");
+  reading.className = "reading";
+  const swatch = document.createElement("span");
+  swatch.className = "swatch " + swatchClass;
+  reading.append(swatch);
+  reading.append(document.createTextNode(label));
+  if (tag) {
+    const badge = document.createElement("span");
+    badge.className = tag[0];
+    badge.textContent = tag[1];
+    reading.append(badge);
+  }
+  const value = document.createElement("b");
+  value.className = "num";
+  value.textContent = formatDuration(ms);
+  reading.append(value);
+  return reading;
+}
+
+function inspectMonitorFrame(frame, turns) {
+  monInspectedId = frame.dataset.id;
+  for (const other of monFramesEl.children) {
+    other.classList.toggle("inspected", other === frame);
+  }
+  const turn = turns.find((t) => t.id === frame.dataset.id);
+  if (!turn) return;
+
+  const mine = myAnswers.get(turn.id);
+  let who;
+  if (mine) {
+    who = "Your answer, T" + mine;
+  } else if (turn === turns[turns.length - 1]) {
+    who = "Latest answer";
+  } else {
+    who = "Answer " + (turns.indexOf(turn) + 1) + " of " + turns.length;
+  }
+
+  monInspectTitle.textContent = "";
+  const lead = document.createElement("b");
+  lead.textContent = who;
+  monInspectTitle.append(lead);
+  monInspectTitle.append(
+    document.createTextNode(", " + (turn.spoken ? "spoken" : "typed") + ", " + formatDuration(turn.total_ms) + " in all")
+  );
+
+  monInspectReadings.textContent = "";
+  if (turn.spoken) monInspectReadings.append(monReading("sw-listen", "Hearing you finish", turn.listen_ms));
+  monInspectReadings.append(monReading("sw-llm", "Thinking and writing", turn.llm_ms));
+  const embedTag =
+    turn.cache === "hit" ? ["cache-hit", "cache hit"]
+    : turn.cache === "miss" ? ["cache-miss", "new question"] : null;
+  monInspectReadings.append(monReading("sw-embed", "Understanding the question", turn.embed_ms, embedTag));
+  monInspectReadings.append(monReading("sw-search", "Searching", turn.search_ms));
+  if (turn.spoken) monInspectReadings.append(monReading("sw-listen", "Starting to speak", turn.speak_ms));
+}
+
+function resolveInspected(turns) {
+  const ids = new Set(turns.map((turn) => turn.id));
+  if (monInspectedId && ids.has(monInspectedId)) return monInspectedId;
+  return turns.length ? turns[turns.length - 1].id : null;
+}
+
+function inspectMonitorId(id, turns) {
+  const frame = Array.from(monFramesEl.children).find((f) => f.dataset.id === id);
+  if (!frame) {
+    monInspectTitle.textContent = "";
+    monInspectReadings.textContent = "";
+    return;
+  }
+  inspectMonitorFrame(frame, turns);
+}
+
+function renderMonitorBars(summary) {
+  const rows = [
+    ["Thinking and writing", summary.median_llm_ms, "llm"],
+    ["Understanding a new question", summary.median_embed_miss_ms, "embed"],
+    ["Understanding a repeat, from cache", summary.median_embed_hit_ms, "embed"],
+    ["Searching", summary.median_search_ms, "search"],
+  ];
+  const max = Math.max(...rows.map((row) => (row[1] == null ? 0 : row[1])));
+  monBars.textContent = "";
+  for (const [label, ms, kind] of rows) {
+    const bar = document.createElement("div");
+    bar.className = "mon-bar" + (ms === max && max > 0 ? " hot" : "");
+    const labels = document.createElement("div");
+    labels.className = "mon-bar-label";
+    const name = document.createElement("span");
+    name.textContent = label;
+    const value = document.createElement("b");
+    value.className = "num";
+    value.textContent = formatDuration(ms);
+    labels.append(name, value);
+
+    const track = document.createElement("div");
+    track.className = "mon-track";
+    const fill = document.createElement("div");
+    fill.className = "mon-fill mon-fill-" + kind;
+    fill.style.width = ms == null ? "0" : (ms / max) * 100 + "%";
+    track.append(fill);
+
+    bar.append(labels, track);
+    monBars.append(bar);
+  }
+}
+
+function renderMonitorVerdict(summary) {
+  monVerdict.textContent = "";
+  const llm = summary.median_llm_ms;
+  const search = summary.median_search_ms;
+  if (llm > 0 && search > 0) {
+    const times = document.createElement("b");
+    times.className = "num";
+    times.textContent = Math.round(llm / search) + "×";
+    monVerdict.append(
+      document.createTextNode("The model takes "),
+      times,
+      document.createTextNode(" longer than the database. Speed comes from the model, not the search.")
+    );
+    monVerdict.hidden = false;
+  } else {
+    monVerdict.hidden = true;
+  }
+}
+
+function renderMonitor(data) {
+  const summary = data.summary || {};
+  const turns = monShownTurns(data);
+  const empty = turns.length === 0;
+
+  monEmpty.hidden = !empty;
+  if (empty) {
+    monCount.textContent = "–";
+    monTotal.textContent = "–";
+    monCache.textContent = "–";
+  } else {
+    const spoken = turns.filter((turn) => turn.spoken).length;
+    const label = "Last " + turns.length + (turns.length === 1 ? " answer" : " answers");
+    monCount.textContent = spoken > 0 ? label + ", " + spoken + " spoken" : label;
+    monTotal.textContent = formatDuration(summary.median_total_ms);
+    monCache.textContent = summary.cache_hit_rate == null ? "–" : Math.round(summary.cache_hit_rate * 100) + "%";
+  }
+
+  renderMonitorGrid(turns);
+  renderMonitorFrames(turns);
+  renderMonitorBars(summary);
+  renderMonitorVerdict(summary);
+  inspectMonitorId(resolveInspected(turns), turns);
+}
+
+async function loadMonitor() {
+  // A refresh asked for mid-flight (say, right after the shopper's own answer) runs
+  // once the current one lands, so their new column is never missed.
+  if (monInFlight) {
+    monReloadQueued = true;
+    return;
+  }
+  monInFlight = true;
+  try {
+    const response = await fetch("/api/monitor");
+    if (!response.ok) return;
+    const data = await response.json();
+    renderMonitor(data);
+  } catch {
+    // keep whatever is on screen
+  } finally {
+    monInFlight = false;
+    if (monReloadQueued) {
+      monReloadQueued = false;
+      loadMonitor();
+    }
+  }
+}
+
+function updateMonitorPolling() {
+  const active = monVisible && document.visibilityState === "visible";
+  if (active && monPolling === null) {
+    monPolling = setInterval(loadMonitor, MONITOR_POLL_MS);
+  } else if (!active && monPolling !== null) {
+    clearInterval(monPolling);
+    monPolling = null;
+  }
+}
+
+function setupMonitorPolling() {
+  if (typeof IntersectionObserver === "undefined") {
+    monVisible = true;
+  } else {
+    const observer = new IntersectionObserver((entries) => {
+      monVisible = entries.some((entry) => entry.isIntersecting);
+      updateMonitorPolling();
+    });
+    observer.observe(monRoll);
+  }
+  document.addEventListener("visibilitychange", () => {
+    updateMonitorPolling();
+    if (document.visibilityState === "visible" && monVisible) loadMonitor();
+  });
+  updateMonitorPolling();
+}
+
 function init() {
   thread = document.getElementById("thread");
   threadEmpty = document.getElementById("thread-empty");
@@ -765,6 +1103,19 @@ function init() {
   note = document.getElementById("limit-note");
   scoreboard = document.getElementById("scoreboard");
   failsList = document.getElementById("scoreboard-fails");
+
+  monCount = document.getElementById("mon-count");
+  monTotal = document.getElementById("mon-total");
+  monCache = document.getElementById("mon-cache");
+  monChart = document.getElementById("mon-chart");
+  monFramesEl = document.getElementById("mon-frames");
+  monEmpty = document.getElementById("mon-empty");
+  monInspectTitle = document.getElementById("mon-inspect-title");
+  monInspectReadings = document.getElementById("mon-inspect-readings");
+  monBars = document.getElementById("mon-bars");
+  monVerdict = document.getElementById("mon-verdict");
+  monRoll = document.querySelector(".mon-roll");
+  setupMonitorPolling();
 
   askForm.addEventListener("submit", (event) => {
     event.preventDefault();
@@ -788,6 +1139,7 @@ function init() {
   checkVoiceStatus();
   fetch("/api/health").catch(() => {});
   loadScoreboard();
+  loadMonitor();
 }
 
 document.addEventListener("DOMContentLoaded", init);

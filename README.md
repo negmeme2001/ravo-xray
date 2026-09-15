@@ -35,11 +35,14 @@ Browser ─► FastAPI on Vercel (fra1) ─► ravo_core
                                         ├─ assistant.py   tool-calling loop (gpt-4.1-mini) + trace
                                         ├─ tools.py       search_products / search_documents (pgvector, HNSW, ef_search=80)
                                         ├─ embed_cache.py query-embedding cache (Upstash Redis, 30-day TTL)
+                                        ├─ monitor.py     live monitor: each answer's timings (no text) in Redis
                                         └─ limits.py      rate limits
                               Neon Postgres 16 + pgvector   Upstash Redis
 ```
 
-- `app.py`: access-code gate (HMAC-signed cookie), `/api/chat`, `/api/eval`, `/api/health`.
+- `app.py`: access-code gate (HMAC-signed cookie), `/api/chat`, `/api/monitor`, `/api/eval`, `/api/health`.
+- The live monitor on the page draws the last 40 real answers (typed and spoken) from `/api/monitor`;
+  its headline medians use typed answers only, because a spoken turn is timed from the shopper going quiet.
 - `templates/app.html`, `public/`: the page. Plain HTML, CSS and JavaScript.
 - `agent/`: the LiveKit voice agent (Deepgram Flux speech recognition and Cartesia Sonic 3 speech through
   LiveKit Inference, with an OpenAI fallback voice), deployed to LiveKit Cloud with the `Dockerfile`.

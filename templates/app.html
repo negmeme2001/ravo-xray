@@ -71,30 +71,36 @@
 
     <section aria-labelledby="where-time-goes">
       <h2 id="where-time-goes">Where a 3-second answer spends its time</h2>
-      <div class="split">
-        <div>
-          <p class="lede">I rebuilt the search path to profile it before changing anything. The database was never the problem. Within retrieval, the expensive step is the call that turns a question into an embedding, which the cache removes; across the whole answer, the language model is the largest cost by far.</p>
-          <div class="figures">
-            <div class="figure"><div class="value num">6 ms</div><div class="what">searching 1,500 products in Postgres (median)</div></div>
-            <div class="figure"><div class="value num">164 ms</div><div class="what">turning the question into an embedding from this server; 526 ms from a home connection, with one spike to 1,728 ms</div></div>
-            <div class="figure"><div class="value num">3 ms</div><div class="what">the same question again, served from the cache</div></div>
+      <div class="mon-roll">
+        <div class="mon-edge">
+          <span class="mon-live"><span class="mon-live-dot" aria-hidden="true"></span>Live</span>
+          <span id="mon-count" class="num">–</span>
+          <span class="mon-spacer"></span>
+          <span class="mon-readout">Median answer<b class="num" id="mon-total">–</b></span>
+          <span class="mon-readout">Cache hits<b class="num" id="mon-cache">–</b></span>
+        </div>
+
+        <div class="mon-strip">
+          <div class="mon-perf" aria-hidden="true"></div>
+          <div class="mon-chart" id="mon-chart">
+            <p class="mon-empty" id="mon-empty" hidden>No answers yet. Ask something above and watch it land here.</p>
+            <div class="mon-frames" id="mon-frames" role="list" aria-label="Recent answers, oldest to newest"></div>
+          </div>
+          <div class="mon-perf" aria-hidden="true"></div>
+
+          <div class="mon-inspect" aria-live="polite">
+            <div class="mon-inspect-title" id="mon-inspect-title"></div>
+            <div class="readings" id="mon-inspect-readings"></div>
           </div>
         </div>
-        <figure class="film" style="margin:0">
-          <div style="display:flex;align-items:center;gap:0.6rem;font-size:0.875rem;color:var(--bone-dim);margin-bottom:0.7rem">
-            <span class="marker">L</span><span>Retrieval step, measured in the lab</span>
-          </div>
-          <div class="exposure" role="img" aria-label="Embedding 97.7 percent of retrieval time, search 2.3 percent">
-            <div class="seg seg-hot" style="flex-basis:97.7%"></div>
-            <div class="seg seg-search" style="flex-basis:2.3%"></div>
-          </div>
-          <div class="readings">
-            <div class="reading hot"><span class="swatch" style="background:var(--hot)"></span>Embedding <b class="num">97.7%</b></div>
-            <div class="reading"><span class="swatch" style="background:var(--glow);opacity:.55"></span>Search <b class="num">2.3%</b></div>
-          </div>
-          <figcaption class="reading" style="margin-top:0.7rem">Lab measurement over 10 queries. The full turn in the live x-ray above adds the language model, which is usually the largest band.</figcaption>
-        </figure>
+
+        <div class="mon-medians">
+          <h3>Median per step<span>typed answers only</span></h3>
+          <div id="mon-bars"></div>
+          <p class="mon-verdict" id="mon-verdict" hidden></p>
+        </div>
       </div>
+      <p class="mon-caption">Real answers from this demo. Timings only; questions aren't stored.</p>
     </section>
 
     <section aria-labelledby="scoreboard-title">
@@ -116,7 +122,7 @@
         </li>
         <li class="plug">
           <h3>The x-ray</h3>
-          <p>Timing around the embedding call, the search and each language-model call, written into the logging Ravo already has. The 3 seconds becomes a breakdown anyone can read.</p>
+          <p>Timing around the embedding call, the search and each language-model call, written into the logging Ravo already has. The 3 seconds becomes a breakdown anyone can read. The same per-answer timings can feed the Prometheus and Grafana dashboards an operations team already watches.</p>
         </li>
         <li class="plug">
           <h3>The scoreboard</h3>
