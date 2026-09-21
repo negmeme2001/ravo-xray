@@ -17,7 +17,7 @@ import aiohttp
 from livekit import rtc
 from livekit.agents import inference, stt
 
-from voicetest.audio import duration_s, find_clip, load_pcm16, sha256_file
+from voicetest.audio import VOICE_RMS_THRESHOLD, duration_s, find_clip, load_pcm16, pcm_rms, sha256_file
 from voicetest.scoring import cer, keyword_recall, text_language
 
 SAMPLE_RATE = 24_000
@@ -91,7 +91,9 @@ async def _push_audio(stream: Any, pcm: bytes, timing: dict[str, float]) -> None
         if len(chunk) % 2:
             chunk += b"\x00"
         stream.push_frame(rtc.AudioFrame(chunk, SAMPLE_RATE, 1, len(chunk) // 2))
-        timing["last_speech"] = time.perf_counter()
+        # Latency counts from the last spoken frame, not the recording's trailing silence.
+        if pcm_rms(chunk) > VOICE_RMS_THRESHOLD:
+            timing["last_speech"] = time.perf_counter()
         next_push += len(chunk) / 2 / SAMPLE_RATE
         await asyncio.sleep(max(0.0, next_push - loop.time()))
     silence = b"\x00" * FRAME_BYTES
