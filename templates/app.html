@@ -48,61 +48,58 @@
           <span class="voice-timer num" id="voice-timer">3:00</span>
           <button class="btn btn-quiet" id="voice-end" type="button">End call</button>
         </div>
+        <p id="voice-hint" hidden>Prefer to speak? Press <b>Talk</b>. The same assistant answers out loud, using the same search and the same cache.</p>
         <p class="limit-note" id="limit-note" hidden></p>
       </div>
     </main>
-
-    <aside class="guide" aria-label="How to read the x-ray">
-      <h2>Reading the x-ray</h2>
-      <p>Under every answer is a strip of film. Its length is the whole turn; each band is one step, sized by the time it took.</p>
-      <ul class="legend">
-        <li><span class="swatch sw-llm"></span><span><b>Thinking and writing</b>: the language model deciding what to look up, then writing the answer.</span></li>
-        <li><span class="swatch sw-embed"></span><span><b>Understanding the question</b>: turning it into an embedding. A cache hit makes this band almost vanish.</span></li>
-        <li><span class="swatch sw-search"></span><span><b>Searching</b>: finding the closest products or document passages in Postgres.</span></li>
-        <li id="legend-voice" hidden><span class="swatch sw-listen"></span><span><b>Hearing and speaking</b>: in spoken answers, noticing you've finished talking, then producing the first sound of the reply.</span></li>
-        <li><span class="swatch sw-hot"></span><span><b>Amber</b> marks the step that cost the most.</span></li>
-      </ul>
-      <p>Ask the same question twice and watch the second band shrink.</p>
-      <p id="voice-hint" hidden>Prefer to speak? Press <b>Talk</b>. The same assistant answers out loud, using the same search and the same cache.</p>
-    </aside>
   </div>
 
-  <div class="evidence">
-
-    <section aria-labelledby="where-time-goes">
-      <h2 id="where-time-goes">Where a 3-second answer spends its time</h2>
-      <div class="mon-roll">
-        <div class="mon-edge">
-          <span class="mon-live"><span class="mon-live-dot" aria-hidden="true"></span>Live</span>
-          <span id="mon-count" class="num">–</span>
-          <span class="mon-spacer"></span>
-          <span class="mon-readout">Median answer<b class="num" id="mon-total">–</b></span>
-          <span class="mon-readout">Cache hits<b class="num" id="mon-cache">–</b></span>
+  <section class="log-section" aria-labelledby="log-title">
+    <div class="log-head">
+      <h2 id="log-title">Live monitor and your turns</h2>
+      <ul class="legend-inline">
+        <li><span class="swatch sw-llm"></span><span>Thinking and writing</span></li>
+        <li><span class="swatch sw-embed"></span><span>Understanding</span></li>
+        <li><span class="swatch sw-search"></span><span>Searching</span></li>
+        <li id="legend-voice" hidden><span class="swatch sw-listen"></span><span>Hearing and speaking</span></li>
+        <li><span class="swatch sw-hot"></span><span>Costliest step</span></li>
+      </ul>
+    </div>
+    <div class="mon-roll">
+      <div class="mon-edge">
+        <span class="mon-live"><span class="mon-live-dot" aria-hidden="true"></span>Live</span>
+        <span id="mon-count" class="num">–</span>
+        <span class="mon-spacer"></span>
+        <span class="mon-readout">Median answer<b class="num" id="mon-total">–</b></span>
+        <span class="mon-readout">Cache hits<b class="num" id="mon-cache">–</b></span>
+      </div>
+      <div class="mon-strip">
+        <div class="mon-perf" aria-hidden="true"></div>
+        <div class="mon-chart" id="mon-chart">
+          <p class="mon-empty" id="mon-empty" hidden>No answers yet. Ask something above and watch it land here.</p>
+          <div class="mon-frames" id="mon-frames" role="list" aria-label="Recent answers, oldest to newest"></div>
         </div>
-
-        <div class="mon-strip">
-          <div class="mon-perf" aria-hidden="true"></div>
-          <div class="mon-chart" id="mon-chart">
-            <p class="mon-empty" id="mon-empty" hidden>No answers yet. Ask something above and watch it land here.</p>
-            <div class="mon-frames" id="mon-frames" role="list" aria-label="Recent answers, oldest to newest"></div>
-          </div>
-          <div class="mon-perf" aria-hidden="true"></div>
-
-          <div class="mon-inspect" aria-live="polite">
-            <div class="mon-inspect-title" id="mon-inspect-title"></div>
-            <div class="readings" id="mon-inspect-readings"></div>
-          </div>
-        </div>
-
-        <div class="mon-medians">
-          <h3>Median per step<span>typed answers only</span></h3>
-          <div id="mon-bars"></div>
-          <p class="mon-verdict" id="mon-verdict" hidden></p>
+        <div class="mon-perf" aria-hidden="true"></div>
+        <div class="mon-inspect" aria-live="polite">
+          <div class="mon-inspect-title" id="mon-inspect-title"></div>
+          <div class="readings" id="mon-inspect-readings"></div>
         </div>
       </div>
-      <p class="mon-caption">Real answers from this demo. Timings only; questions aren't stored.</p>
-    </section>
+      <div class="mon-medians">
+        <h3>Median per step<span>typed answers only</span></h3>
+        <div id="mon-bars"></div>
+        <p class="mon-verdict" id="mon-verdict" hidden></p>
+      </div>
+    </div>
+    <p class="mon-caption">Real answers from this demo. Timings only; questions aren't stored.</p>
+    <details class="your-turns" id="your-turns" open>
+      <summary><span>Your turns</span><span class="count num" id="turn-count">0</span><span class="hint">newest first</span></summary>
+      <p class="turns-empty" id="turns-empty">Ask something above; each answer's x-ray appears here.</p>
+      <div class="turn-list" id="turn-list"></div>
+    </details>
+  </section>
 
+  <div class="evidence">
     <section aria-labelledby="scoreboard-title">
       <h2 id="scoreboard-title">Every change to search gets a score</h2>
       <p class="lede" id="scoreboard-lede">…</p>
@@ -119,7 +116,7 @@
       <h2 id="plugs-title">How this plugs into Ravo</h2>
       <ul class="ev-plugs">
         <li><h3>The cache</h3><span class="ev-gain num">164 ms → 3 ms</span><p>One Redis lookup before the embedding call, on every repeat question.</p></li>
-        <li><h3>The x-ray</h3><span class="ev-gain">Every answer, timed</span><p>Written into the logs Ravo already has, ready for Prometheus and Grafana.</p></li>
+        <li><h3>The x-ray</h3><span class="ev-gain">Every answer, timed</span><p>Written into the logs Ravo already has, and can be exported to Prometheus and Grafana.</p></li>
         <li><h3>The scoreboard</h3><span class="ev-gain num" id="plug-count">…</span><p>A worse search is caught before it reaches a kiosk.</p></li>
       </ul>
     </section>
@@ -144,19 +141,24 @@
 
 <!-- DOM contract for app.js -->
 <template id="tpl-user">
-  <article class="msg msg-user"><div class="bubble"></div></article>
+  <article class="msg msg-user"><div class="bubble" dir="auto"></div></article>
 </template>
 
 <template id="tpl-assistant">
   <article class="msg msg-assistant">
-    <div class="bubble"></div>
+    <div class="bubble" dir="auto"></div>
     <div class="cards" hidden></div>
     <div class="citations" hidden></div>
-    <details class="film">
-      <summary><span class="marker"></span><span class="film-caption">X-ray of this answer</span><span class="total num"></span></summary>
-      <div class="exposure"></div>
-      <div class="readings"></div>
-    </details>
+    <button class="turn-chip" type="button" hidden><span class="chip-t"></span><span class="chip-text"></span> <span aria-hidden="true">↓</span></button>
+  </article>
+</template>
+
+<template id="tpl-log-entry">
+  <article class="film turn-entry">
+    <header class="entry-head"><span class="marker"></span><span class="meta"></span><span class="total num"></span></header>
+    <div class="exposure"></div>
+    <div class="readings"></div>
+    <a class="back" href="#">↑ Back to chat</a>
   </article>
 </template>
 

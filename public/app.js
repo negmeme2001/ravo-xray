@@ -21,7 +21,8 @@ let conversationId = crypto.randomUUID();
 let messages = [];
 let turnCount = 0;
 let busy = false;
-let lastOpenFilm = null;
+const turnsById = new Map();
+let yourTurns, turnCountEl, turnsEmpty, turnList;
 
 let myAnswers = new Map();
 let monLatestMine = null;
@@ -131,8 +132,6 @@ function appendPending(text) {
   const asstMsg = cloneTemplate("tpl-assistant");
   asstMsg.classList.add("msg-pending");
   asstMsg.querySelector(".bubble").textContent = "Looking that up…";
-  const film = asstMsg.querySelector(".film");
-  film.hidden = true;
   thread.append(userMsg, asstMsg);
   scrollThread();
   return asstMsg;
@@ -192,13 +191,11 @@ function renderCitation(item) {
   return citation;
 }
 
-function renderFilm(film, trace) {
-  film.hidden = false;
+function renderFilm(film, trace, number) {
   const steps = trace.steps || [];
   const totalMs = trace.total_ms || 0;
-  turnCount += 1;
-  film.querySelector(".marker").textContent = "T" + turnCount;
-  film.querySelector(".total").textContent = formatMs(totalMs) + " ms";
+  film.querySelector(".marker").textContent = "T" + number;
+  film.querySelector(".total").textContent = formatDuration(totalMs);
 
   const exposure = film.querySelector(".exposure");
   const readings = film.querySelector(".readings");
@@ -231,7 +228,7 @@ function renderFilm(film, trace) {
     reading.append(document.createTextNode(step.label + " "));
     const ms = document.createElement("b");
     ms.className = "num";
-    ms.textContent = formatMs(step.ms) + " ms";
+    ms.textContent = formatDuration(step.ms);
     reading.append(ms);
     if (step.kind === "embed" && step.cache === "hit") {
       const badge = document.createElement("span");
@@ -247,9 +244,76 @@ function renderFilm(film, trace) {
     readings.append(reading);
   });
 
-  if (lastOpenFilm) lastOpenFilm.open = false;
-  film.open = true;
-  lastOpenFilm = film;
+}
+
+function replyLanguage(text) {
+  const letters = String(text || "").match(/\p{L}/gu) || [];
+  if (!letters.length) return "Mixed";
+  const arabic = letters.filter((letter) => /\p{Script=Arabic}/u.test(letter)).length;
+  if (arabic / letters.length >= 0.3) return "Arabic";
+  return arabic === 0 ? "English" : "Mixed";
+}
+
+function languageLabel(language, messageNode) {
+  const labels = { ar: "Arabic", en: "English", mixed: "Mixed" };
+  return labels[String(language || "").toLowerCase()] ||
+    replyLanguage(messageNode.querySelector(".bubble").textContent);
+}
+
+function activateTurn(id, { scroll = false } = {}) {
+  document.querySelectorAll(".turn-chip.is-active, .turn-entry.is-active, .mon-frame.is-active")
+    .forEach((element) => element.classList.remove("is-active"));
+  const turn = turnsById.get(id);
+  if (!turn) return;
+  turn.chip.classList.add("is-active");
+  turn.logNode.classList.add("is-active");
+  document.querySelectorAll(".mon-frame[data-turn]").forEach((frame) => {
+    frame.classList.toggle("is-active", frame.dataset.turn === id);
+  });
+  yourTurns.open = true;
+  if (scroll) {
+    turn.logNode.scrollIntoView({ block: "center", behavior: REDUCED_MOTION.matches ? "auto" : "smooth" });
+  }
+}
+
+function addTurn({ kind, trace, messageNode, monitorId, language }) {
+  turnCount += 1;
+  const number = turnCount;
+  const id = "T" + number;
+  const logNode = cloneTemplate("tpl-log-entry");
+  logNode.id = id;
+  renderFilm(logNode, trace, number);
+
+  const label = languageLabel(language || trace.language, messageNode);
+  const hasSearch = (trace.steps || []).some((step) => step.kind === "search");
+  const hasCards = !messageNode.querySelector(".cards").hidden;
+  const meta = [kind, label];
+  if (!hasSearch && !hasCards) meta.push("asked to clarify");
+  logNode.querySelector(".meta").textContent = meta.join(" · ");
+  turnList.prepend(logNode);
+  turnCountEl.textContent = String(turnCount);
+  turnsEmpty.hidden = true;
+
+  messageNode.id = "msg-" + id;
+  const chip = messageNode.querySelector(".turn-chip");
+  chip.querySelector(".chip-t").textContent = id;
+  const chipParts = [kind];
+  if (kind === "spoken" && label !== "English") chipParts.push(label);
+  if (!hasSearch && !hasCards) chipParts.push("asked to clarify");
+  chipParts.push(formatDuration(trace.total_ms || 0));
+  chip.querySelector(".chip-text").textContent = chipParts.join(" · ");
+  chip.hidden = false;
+  chip.addEventListener("click", () => activateTurn(id, { scroll: true }));
+  logNode.querySelector(".back").addEventListener("click", (event) => {
+    event.preventDefault();
+    messageNode.scrollIntoView({ block: "center", behavior: REDUCED_MOTION.matches ? "auto" : "smooth" });
+  });
+
+  turnsById.set(id, {
+    id, number, kind, language: label, totalMs: trace.total_ms || 0, trace,
+    messageNode, logNode, chip, monitorId,
+  });
+  noteMyAnswer(monitorId, number);
 }
 
 function renderReply(asstMsg, data) {
@@ -275,8 +339,7 @@ function renderReply(asstMsg, data) {
     for (const item of data.citations) citations.append(renderCitation(item));
   }
 
-  renderFilm(asstMsg.querySelector(".film"), data.trace);
-  noteMyAnswer(data.monitor_id);
+  addTurn({ kind: "typed", trace: data.trace, messageNode: asstMsg, monitorId: data.monitor_id });
   loadMonitor();
 
   messages.push({ role: "assistant", content: data.reply });
@@ -303,12 +366,19 @@ function resetConversation() {
   conversationId = crypto.randomUUID();
   messages = [];
   turnCount = 0;
-  lastOpenFilm = null;
+  turnsById.clear();
+  turnList.textContent = "";
+  turnsEmpty.hidden = false;
+  turnCountEl.textContent = "0";
+  myAnswers.clear();
+  monLatestMine = null;
+  monInspectedId = null;
   thread.textContent = "";
   thread.append(threadEmpty);
   threadEmpty.hidden = false;
   note.textContent = "";
   note.hidden = true;
+  loadMonitor();
 }
 
 function handleError(asstMsg, error) {
@@ -674,6 +744,7 @@ let voiceTimerId = null;
 let voiceSecondsLeft = 0;
 let voiceAudioEls = [];
 let voiceAssistantBubbles = new Map();
+let voiceTurnNodes = new Map();
 let voiceLatestAssistant = null;
 let voiceAwaitingReply = null;
 
@@ -706,7 +777,6 @@ function voiceBubbleForSegment(segmentId) {
       voiceAwaitingReply = null;
     } else {
       node = cloneTemplate("tpl-assistant");
-      node.querySelector(".film").hidden = true;
       thread.append(node);
       showVoiceThreadContent();
     }
@@ -727,7 +797,6 @@ function setVoiceBubbleText(node, text) {
 function renderVoiceError(message) {
   const node = cloneTemplate("tpl-assistant");
   node.classList.add("msg-error");
-  node.querySelector(".film").hidden = true;
   node.querySelector(".bubble").textContent = message;
   thread.append(node);
   showVoiceThreadContent();
@@ -747,6 +816,7 @@ function cleanupVoiceNotes() {
   for (const el of voiceAudioEls) el.remove();
   voiceAudioEls = [];
   voiceAssistantBubbles = new Map();
+  voiceTurnNodes = new Map();
   voiceLatestAssistant = null;
   voiceAwaitingReply = null;
 }
@@ -760,15 +830,23 @@ async function handleVoiceTranscription(stream, isUserSpeech) {
     }
   }
   const final = voiceAttrs(stream)["lk.transcription_final"] === "true";
+  const turnId = voiceAttrs(stream).turn_id;
   if (isUserSpeech) {
     if (final && text) {
       const node = cloneTemplate("tpl-user");
-      node.querySelector(".bubble").textContent = text;
+      const bubble = node.querySelector(".bubble");
+      const mic = document.createElement("span");
+      mic.className = "mic";
+      mic.setAttribute("aria-label", "spoken");
+      mic.textContent = "🎙";
+      bubble.append(mic, document.createTextNode(text));
       thread.append(node);
       showVoiceThreadContent();
     }
   } else if (text) {
-    setVoiceBubbleText(voiceBubbleForSegment(segmentKey(stream)), text);
+    const node = voiceBubbleForSegment(segmentKey(stream));
+    if (turnId && !voiceTurnNodes.has(turnId)) voiceTurnNodes.set(turnId, node);
+    setVoiceBubbleText(node, text);
   }
 }
 
@@ -788,9 +866,9 @@ async function handleVoiceCards(stream) {
   const cards = data.cards;
   if (!Array.isArray(cards) || !cards.length) return;
   const node = cloneTemplate("tpl-assistant");
-  node.querySelector(".film").hidden = true;
   thread.append(node);
   voiceAwaitingReply = node;
+  if (data.turn_id && !voiceTurnNodes.has(data.turn_id)) voiceTurnNodes.set(data.turn_id, node);
   const wrap = node.querySelector(".cards");
   for (const item of cards) wrap.append(renderCard(item));
   wrap.hidden = false;
@@ -804,14 +882,13 @@ async function handleVoiceTrace(stream) {
   } catch {
     return;
   }
-  // The trace is sent once the spoken answer is committed, so the latest
-  // assistant bubble is the answer it describes.
-  const node = voiceLatestAssistant;
+  const node = (trace.turn_id && voiceTurnNodes.get(trace.turn_id)) || voiceLatestAssistant;
   if (!node || !Array.isArray(trace.steps)) return;
-  const film = node.querySelector(".film");
-  film.querySelector(".film-caption").textContent = "X-ray of this spoken answer";
-  renderFilm(film, trace);
-  noteMyAnswer(trace.monitor_id);
+  if (trace.turn_id && !voiceTurnNodes.has(trace.turn_id)) voiceTurnNodes.set(trace.turn_id, node);
+  addTurn({
+    kind: "spoken", trace, messageNode: node,
+    monitorId: trace.monitor_id, language: trace.language,
+  });
   loadMonitor();
   scrollThread();
 }
@@ -842,7 +919,6 @@ function cleanupVoiceCall() {
   resetVoiceUI();
   cleanupVoiceNotes();
   const note = cloneTemplate("tpl-assistant");
-  note.querySelector(".film").hidden = true;
   setVoiceBubbleText(note, "Voice session ended.");
   thread.append(note);
   showVoiceThreadContent();
@@ -986,9 +1062,9 @@ function formatDuration(ms) {
   return ms >= 1000 ? (ms / 1000).toFixed(1) + " s" : Math.round(ms) + " ms";
 }
 
-function noteMyAnswer(id) {
+function noteMyAnswer(id, number) {
   if (!id) return;
-  myAnswers.set(id, turnCount);
+  myAnswers.set(id, number);
   monLatestMine = id;
   monInspectedId = id;
 }
@@ -1051,7 +1127,10 @@ function renderMonitorFrames(turns) {
     frame.setAttribute("aria-label", monDescribe(turn, index));
     if (turn.spoken) frame.classList.add("spoken");
     const mine = myAnswers.get(turn.id);
-    if (mine) frame.classList.add("mine");
+    if (mine) {
+      frame.classList.add("mine");
+      frame.dataset.turn = "T" + mine;
+    }
     newIds.add(turn.id);
 
     const stack = document.createElement("div");
@@ -1087,7 +1166,10 @@ function renderMonitorFrames(turns) {
 
     frame.addEventListener("mouseenter", () => inspectMonitorFrame(frame, turns));
     frame.addEventListener("focus", () => inspectMonitorFrame(frame, turns));
-    frame.addEventListener("click", () => inspectMonitorFrame(frame, turns));
+    frame.addEventListener("click", () => {
+      inspectMonitorFrame(frame, turns);
+      if (frame.dataset.turn) activateTurn(frame.dataset.turn, { scroll: false });
+    });
     framesEl.append(frame);
   });
 
@@ -1318,6 +1400,11 @@ function init() {
   nextNegation = document.getElementById("next-negation");
   nextDiversity = document.getElementById("next-diversity");
   nextHit1 = document.getElementById("next-hit1");
+  yourTurns = document.getElementById("your-turns");
+  turnCountEl = document.getElementById("turn-count");
+  turnsEmpty = document.getElementById("turns-empty");
+  turnList = document.getElementById("turn-list");
+  if (window.matchMedia("(max-width: 640px)").matches) yourTurns.open = false;
 
   monCount = document.getElementById("mon-count");
   monTotal = document.getElementById("mon-total");
