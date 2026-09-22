@@ -50,6 +50,9 @@ BILINGUAL_TRANSCRIPTION_TIMEOUT = 3.0
 MAX_PRODUCTS_FOR_VOICE = 5
 CARDS_TOPIC = "ravo.cards"
 TRACE_TOPIC = "ravo.trace"
+# Rooms the voice test suite opens (the site uses "rx-"); their answers stay out of
+# the live monitor so a test run never fills the demo's film roll.
+TEST_ROOM_PREFIX = "vt-"
 BASE_RULES = assistant.BASE_RULES
 SEARCH_LABELS = {"search_products": "Search products", "search_documents": "Search documents"}
 
@@ -213,13 +216,23 @@ async def _send_json(session: AgentSession, topic: str, payload: dict) -> None:
         logger.exception("could not send %s to the room", topic)
 
 
+def _is_test_room(session: AgentSession | None) -> bool:
+    try:
+        return session.room_io.room.name.startswith(TEST_ROOM_PREFIX)
+    except (AttributeError, RuntimeError):
+        return False
+
+
 async def _publish_trace(session: AgentSession, trace: dict) -> None:
     """Record the trace in the live monitor, then send it; never block the turn."""
-    try:
-        trace["monitor_id"] = await asyncio.to_thread(monitor.record, trace)
-    except Exception:
-        logger.warning("monitor: record failed for a voice turn", exc_info=True)
+    if _is_test_room(session):
         trace["monitor_id"] = None
+    else:
+        try:
+            trace["monitor_id"] = await asyncio.to_thread(monitor.record, trace)
+        except Exception:
+            logger.warning("monitor: record failed for a voice turn", exc_info=True)
+            trace["monitor_id"] = None
     await _send_json(session, TRACE_TOPIC, trace)
 
 

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import contextlib
 import json
 import os
 import statistics
@@ -23,7 +24,10 @@ from voicetest.scoring import cer, keyword_recall, text_language
 SAMPLE_RATE = 24_000
 FRAME_MS = 10
 FRAME_BYTES = SAMPLE_RATE * 2 * FRAME_MS // 1_000
-SILENCE_FRAMES = 1_500 // FRAME_MS
+# After the clip, keep streaming silence the way a live microphone does while the agent
+# waits for the turn to end (up to 3 s in the bilingual profile); a final transcript that
+# has not arrived by then would not have reached the agent in time either.
+SILENCE_FRAMES = 4_000 // FRAME_MS
 REQUIRED_ENV = ("LIVEKIT_URL", "LIVEKIT_API_KEY", "LIVEKIT_API_SECRET")
 
 
@@ -101,7 +105,6 @@ async def _push_audio(stream: Any, pcm: bytes, timing: dict[str, float]) -> None
         stream.push_frame(rtc.AudioFrame(silence, SAMPLE_RATE, 1, FRAME_BYTES // 2))
         next_push += FRAME_MS / 1_000
         await asyncio.sleep(max(0.0, next_push - loop.time()))
-    stream.end_input()
 
 
 async def _collect_events(
@@ -121,10 +124,16 @@ async def transcribe_once(client: inference.STT, pcm: bytes) -> tuple[str, str |
     finals: list[str] = []
     detected: dict[str, str | None] = {"language": None}
     timing: dict[str, float] = {}
+    # The gateway keeps the stream open after the audio ends, so stop listening once the
+    # audio and its trailing silence have been sent rather than waiting for it to close.
     async with client.stream() as stream:
-        async with asyncio.TaskGroup() as tasks:
-            tasks.create_task(_push_audio(stream, pcm, timing))
-            tasks.create_task(_collect_events(stream, finals, detected, timing))
+        collector = asyncio.create_task(_collect_events(stream, finals, detected, timing))
+        try:
+            await _push_audio(stream, pcm, timing)
+        finally:
+            collector.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await collector
     latency = None
     if "last_speech" in timing and "last_final" in timing:
         latency = timing["last_final"] - timing["last_speech"]

@@ -60,6 +60,29 @@ def record(trace: dict) -> str | None:
     return entry["id"]
 
 
+def forget(ids) -> int:
+    """Remove the turns with these ids (a test run's own answers); returns how many.
+
+    Fails open like record: without a Redis client or on any error it removes nothing.
+    """
+    wanted = set(ids)
+    client = get_redis()
+    if not wanted or client is None:
+        return 0
+    removed = 0
+    try:
+        for item in client.lrange(MONITOR_KEY, 0, -1) or []:
+            try:
+                entry_id = json.loads(item).get("id")
+            except (TypeError, ValueError, AttributeError):
+                continue
+            if entry_id in wanted:
+                removed += client.lrem(MONITOR_KEY, 1, item) or 0
+    except Exception:
+        logger.warning("monitor: forget failed", exc_info=True)
+    return removed
+
+
 def recent(n: int = MONITOR_SHOWN) -> list[dict]:
     """The newest up to n summarized turns, oldest first."""
     client = get_redis()

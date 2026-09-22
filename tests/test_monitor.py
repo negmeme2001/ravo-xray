@@ -38,7 +38,15 @@ class FakeRedis:
         self.data[key] = self.data.get(key, [])[start : stop + 1]
 
     def lrange(self, key, start, stop):
-        return self.data.get(key, [])[start : stop + 1]
+        items = self.data.get(key, [])
+        return items[start:] if stop == -1 else items[start : stop + 1]
+
+    def lrem(self, key, count, value):
+        items = self.data.get(key, [])
+        if value in items:
+            items.remove(value)
+            return 1
+        return 0
 
 
 class BoomRedis:
@@ -176,3 +184,18 @@ def test_summary_of_empty_list():
     assert s["median_embed_miss_ms"] is None
     assert s["median_embed_hit_ms"] is None
     assert s["cache_hit_rate"] is None
+
+def test_forget_removes_only_the_given_turns():
+    fake = FakeRedis()
+    set_redis(fake)
+    kept = monitor.record(TYPED_TRACE)
+    dropped = [monitor.record(SPOKEN_TRACE), monitor.record(SPOKEN_TRACE)]
+
+    assert monitor.forget(dropped) == 2
+    assert [turn["id"] for turn in monitor.recent()] == [kept]
+
+
+def test_forget_fails_open():
+    assert monitor.forget(["abc"]) == 0
+    set_redis(BoomRedis())
+    assert monitor.forget(["abc"]) == 0

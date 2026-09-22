@@ -378,3 +378,24 @@ def test_publish_trace_sends_when_monitor_fails(monkeypatch):
     asyncio.run(agent._publish_trace(None, trace))
 
     assert sent["payload"]["monitor_id"] is None
+
+
+def test_publish_trace_skips_the_monitor_in_test_rooms(monkeypatch):
+    sent = {}
+
+    async def fake_send(session, topic, payload):
+        sent["payload"] = payload
+
+    def must_not_record(trace):
+        raise AssertionError("a test room's answer reached the live monitor")
+
+    monkeypatch.setattr(agent, "_send_json", fake_send)
+    monkeypatch.setattr(agent.monitor, "record", must_not_record)
+    session = types.SimpleNamespace(
+        room_io=types.SimpleNamespace(room=types.SimpleNamespace(name="vt-0123456789ab"))
+    )
+
+    trace = {"steps": [], "total_ms": 1.0, "spoken": True}
+    asyncio.run(agent._publish_trace(session, trace))
+
+    assert sent["payload"]["monitor_id"] is None

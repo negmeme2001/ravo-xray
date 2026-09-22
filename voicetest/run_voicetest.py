@@ -15,6 +15,7 @@ from typing import Any
 
 from livekit import api, rtc
 
+from ravo_core import monitor
 from voicetest.audio import VOICE_RMS_THRESHOLD, find_clip, load_pcm16, pcm_rms, sha256_file, speech_span
 from voicetest.outcome import score_turn, summarize_runs
 
@@ -116,7 +117,8 @@ async def _stream_clip(frames: asyncio.Queue[FrameItem], pcm: bytes) -> tuple[fl
 
 
 async def run_session(
-    scenario: dict[str, Any], pcm: bytes, agent_name: str, show_transcripts: bool = False
+    scenario: dict[str, Any], pcm: bytes, agent_name: str, show_transcripts: bool = False,
+    monitor_ids: list[str] | None = None,
 ) -> dict[str, Any]:
     room_name = f"vt-{uuid.uuid4().hex[:12]}"
     identity = f"tester-{uuid.uuid4().hex[:8]}"
@@ -158,6 +160,8 @@ async def run_session(
     async def trace_handler(reader: Any, _participant_identity: str) -> None:
         nonlocal trace_steps, result_updated_at
         payload = json.loads(await reader.read_all())
+        if monitor_ids is not None and payload.get("monitor_id"):
+            monitor_ids.append(payload["monitor_id"])
         if clip_started_at is not None:
             trace_steps = payload.get("steps", [])
             result_updated_at = time.perf_counter()
@@ -219,7 +223,7 @@ async def run_session(
 
 async def run_all(
     scenarios: Sequence[dict[str, Any]], clips_dir: Path, agent_name: str, reps: int,
-    show_transcripts: bool,
+    show_transcripts: bool, monitor_ids: list[str] | None = None,
 ) -> tuple[list[dict[str, Any]], dict[str, str]]:
     rows: list[dict[str, Any]] = []
     clips: dict[str, str] = {}
@@ -232,10 +236,27 @@ async def run_all(
         for rep in range(1, reps + 1):
             base = {"scenario": scenario["id"], "rep": rep}
             try:
-                rows.append({**base, **await run_session(scenario, pcm, agent_name, show_transcripts)})
+                rows.append({
+                    **base,
+                    **await run_session(scenario, pcm, agent_name, show_transcripts, monitor_ids),
+                })
             except Exception as exc:
                 rows.append({**base, "error": f"{type(exc).__name__}: {exc}"})
     return rows, clips
+
+
+def _forget_test_answers(monitor_ids: list[str]) -> None:
+    """Take this run's answers back out of the live monitor (an older agent records them)."""
+    if not monitor_ids:
+        return
+    removed = monitor.forget(monitor_ids)
+    if removed < len(monitor_ids):
+        print(
+            f"Warning: {len(monitor_ids) - removed} of this run's answers are still in the live "
+            "monitor; set KV_REST_API_URL and KV_REST_API_TOKEN to remove them"
+        )
+    else:
+        print(f"Removed this run's {removed} answers from the live monitor")
 
 
 def _print_summary(summary: dict[str, Any]) -> None:
@@ -281,9 +302,10 @@ def main() -> None:
     sessions = len(scenarios) * args.reps
     if sessions > args.max_sessions:
         parser.error(f"refusing {sessions} sessions: --max-sessions is {args.max_sessions}")
+    monitor_ids: list[str] = []
     try:
         rows, clips = asyncio.run(
-            run_all(scenarios, args.clips, args.agent, args.reps, args.show_transcripts)
+            run_all(scenarios, args.clips, args.agent, args.reps, args.show_transcripts, monitor_ids)
         )
         report = (
             json.loads(args.out.read_text(encoding="utf-8")) if args.out.exists() else {"runs": {}}
@@ -292,6 +314,8 @@ def main() -> None:
             raise ValueError(f"{args.out} does not contain a runs object")
     except (FileNotFoundError, ValueError, json.JSONDecodeError) as exc:
         parser.error(str(exc))
+    finally:
+        _forget_test_answers(monitor_ids)
     summary = summarize_runs(rows)
     report["runs"][args.label] = {
         "generated_at": datetime.now(UTC).isoformat(), "git_commit": git_commit(),
