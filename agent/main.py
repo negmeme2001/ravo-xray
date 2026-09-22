@@ -3,24 +3,30 @@
 import asyncio
 import json
 import logging
+import os
 import time
+from collections.abc import Mapping
+from uuid import uuid4
 
 from livekit.agents import (
     Agent,
     AgentSession,
     JobContext,
     JobProcess,
+    StopResponse,
     WorkerOptions,
     cli,
     function_tool,
     inference,
 )
+from livekit.agents import llm as agents_llm
+from livekit.agents import stt as agents_stt
 from livekit.agents import tts as agents_tts
 from livekit.plugins import openai, silero
 
-from ravo_core import assistant, monitor, tools
+from ravo_core import assistant, monitor, tools, understanding
 
-AGENT_NAME = "ravo-xray"
+AGENT_NAME = os.getenv("VOICE_AGENT_NAME", "ravo-xray")
 SESSION_LIMIT_SECONDS = 180
 VOICE_MODEL = "gpt-4.1-mini"
 # The agent runs in eu-central, where LiveKit Inference serves only models with
@@ -28,10 +34,19 @@ VOICE_MODEL = "gpt-4.1-mini"
 STT_MODEL = "deepgram/flux-general-en"
 TTS_MODEL = "cartesia/sonic-3"
 FALLBACK_TTS_VOICE = "ash"
-# The default turn detector waits up to 2.5 s when it isn't sure the shopper has
-# finished; the spoken x-ray showed that cap was most of every voice turn. Kiosk
-# questions are short, so a hesitating detector now commits after 1.2 s instead.
+# The legacy profile commits a hesitating detector after 1.2 seconds.
 MAX_END_OF_TURN_WAIT = 1.2
+# Dynamic endpointing adapts its wait to the speaker.
+BILINGUAL_ENDPOINTING_MODE = "dynamic"
+# A short hesitation should not immediately end a bilingual turn.
+BILINGUAL_MIN_END_OF_TURN_WAIT = 0.5
+# Three seconds gives a two-second pause margin on the first turn.
+BILINGUAL_MAX_END_OF_TURN_WAIT = 3.0
+# False interruptions may resume for two seconds before the reply is discarded.
+BILINGUAL_RESUME_FALSE_INTERRUPTION = True
+BILINGUAL_FALSE_INTERRUPTION_TIMEOUT = 2.0
+# Three seconds lets a bilingual transcript arrive after the shopper stops.
+BILINGUAL_TRANSCRIPTION_TIMEOUT = 3.0
 MAX_PRODUCTS_FOR_VOICE = 5
 CARDS_TOPIC = "ravo.cards"
 TRACE_TOPIC = "ravo.trace"
@@ -44,11 +59,79 @@ VOICE_PROMPT = assistant.BASE_RULES + (
     " Your reply is spoken aloud, so say no lists, no markdown and no symbols. "
     "Use one or two short sentences. Say prices naturally and always name the "
     "currency: 'about sixty-five pounds' is wrong, say 'sixty-five Egyptian "
-    "pounds'."
+    "pounds'. In Arabic replies, say prices in Egyptian Arabic words with "
+    "'جنيه', for example 'خمسة وستين جنيه'."
 )
 
 
-def build_cards_payload(items: list[dict], timing: dict) -> dict:
+def _profile_name(profile: str) -> str:
+    if profile == "bilingual":
+        return "bilingual"
+    return "legacy"
+
+
+def _primary_cartesia_tts(profile: str, env: Mapping[str, str]) -> agents_tts.TTS:
+    tts_options: dict[str, str] = {"model": TTS_MODEL}
+    if profile == "bilingual":
+        tts_options["language"] = "en"
+        if english_voice := env.get("VOICE_TTS_VOICE_EN"):
+            tts_options["voice"] = english_voice
+    return inference.TTS(**tts_options)
+
+
+def _voice_stt(profile: str, env: Mapping[str, str]) -> agents_stt.STT:
+    legacy_stt = inference.STT(model=STT_MODEL, language="en")
+    if profile == "legacy":
+        return legacy_stt
+    bilingual_stt = inference.STT(
+        model=env.get("VOICE_STT_MODEL") or "speechmatics/linden-1",
+        language=env.get("VOICE_STT_LANGUAGE") or "ar_en",
+    )
+    return agents_stt.FallbackAdapter([bilingual_stt, legacy_stt])
+
+
+def _turn_handling(profile: str) -> dict:
+    if profile == "legacy":
+        return {"endpointing": {"max_delay": MAX_END_OF_TURN_WAIT}}
+    return {
+        "endpointing": {
+            "mode": BILINGUAL_ENDPOINTING_MODE,
+            "min_delay": BILINGUAL_MIN_END_OF_TURN_WAIT,
+            "max_delay": BILINGUAL_MAX_END_OF_TURN_WAIT,
+        },
+        "interruption": {
+            "resume_false_interruption": BILINGUAL_RESUME_FALSE_INTERRUPTION,
+            "false_interruption_timeout": BILINGUAL_FALSE_INTERRUPTION_TIMEOUT,
+        },
+    }
+
+
+def session_options(profile: str, env: Mapping[str, str]) -> dict:
+    """Build AgentSession options and expose its switchable Cartesia TTS."""
+    selected_profile = _profile_name(profile)
+    if profile not in {"legacy", "bilingual", ""}:
+        logger.warning("unknown voice profile %r; using legacy", profile)
+    logger.info("voice profile: %s", selected_profile)
+
+    primary_tts = _primary_cartesia_tts(selected_profile, env)
+    options = {
+        "stt": _voice_stt(selected_profile, env),
+        "tts": agents_tts.FallbackAdapter(
+            [
+                primary_tts,
+                openai.TTS(voice=FALLBACK_TTS_VOICE),
+            ]
+        ),
+        "llm": openai.LLM(model=VOICE_MODEL),
+        "turn_handling": _turn_handling(selected_profile),
+        "primary_tts": primary_tts,
+    }
+    if selected_profile == "bilingual":
+        options["transcription_timeout"] = BILINGUAL_TRANSCRIPTION_TIMEOUT
+    return options
+
+
+def build_cards_payload(items: list[dict], timing: dict, turn_id: str) -> dict:
     """Build the JSON payload the client uses to render product cards."""
     return {
         "cards": [
@@ -66,6 +149,7 @@ def build_cards_payload(items: list[dict], timing: dict) -> dict:
             "cache": timing["cache"],
             "search_ms": timing["search_ms"],
         },
+        "turn_id": turn_id,
     }
 
 
@@ -140,9 +224,47 @@ async def _publish_trace(session: AgentSession, trace: dict) -> None:
 
 
 class StoreAgent(Agent):
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        profile: str = "legacy",
+        primary_tts: agents_tts.TTS | None = None,
+        env: Mapping[str, str] | None = None,
+    ) -> None:
         super().__init__(instructions=VOICE_PROMPT)
+        self.profile = _profile_name(profile)
+        self.primary_tts = primary_tts
+        self.voice_env = dict(env or {})
+        self.reply_language = "en"
+        self.turn_id = ""
         self.turn_lookups: list[dict] = []
+
+
+    async def on_user_turn_completed(
+        self,
+        turn_ctx: agents_llm.ChatContext,
+        new_message: agents_llm.ChatMessage,
+    ) -> None:
+        if self.profile != "bilingual":
+            return
+
+        self.turn_id = uuid4().hex[:12]
+        text = new_message.text_content or ""
+        # The transcript's script decides the language: the bilingual STT reports "ar_en"
+        # for every turn, which would pin English speakers to Arabic replies.
+        self.reply_language = understanding.script_language(text)
+        if self.primary_tts is not None:
+            voice_key = f"VOICE_TTS_VOICE_{self.reply_language.upper()}"
+            tts_options = {"language": self.reply_language}
+            if voice := self.voice_env.get(voice_key):
+                tts_options["voice"] = voice
+            self.primary_tts.update_options(**tts_options)
+
+        if understanding.classify(text) in {understanding.EMPTY, understanding.FILLER_ONLY}:
+            self.session.say(understanding.clarification(self.reply_language))
+            raise StopResponse
+        # Left to the prompt, the model answers English in Arabic (the store is
+        # Egyptian), so each turn states the reply language, as the typed chat does.
+        turn_ctx.add_message(role="system", content=assistant.language_instruction(text))
 
     @function_tool
     async def search_products(self, query: str) -> str:
@@ -151,7 +273,11 @@ class StoreAgent(Agent):
         text, items, timing = await _search_products(query)
         self.turn_lookups.append({"tool": "search_products", "started_at": started_at, "timing": timing})
         if any(item["similarity"] >= assistant.CONFIDENT_MATCH for item in items):
-            await _send_json(self.session, CARDS_TOPIC, build_cards_payload(items, timing))
+            await _send_json(
+                self.session,
+                CARDS_TOPIC,
+                build_cards_payload(items, timing, self.turn_id),
+            )
         return text
 
     @function_tool
@@ -184,35 +310,47 @@ async def _say_goodbye_after_limit(session: AgentSession, ctx: JobContext) -> No
 
 async def entrypoint(ctx: JobContext) -> None:
     await ctx.connect()
-    session = AgentSession(
-        stt=inference.STT(model=STT_MODEL, language="en"),
-        # A failing voice provider would leave the shopper in silence, so OpenAI's
-        # TTS takes over automatically if the primary errors.
-        tts=agents_tts.FallbackAdapter(
-            [inference.TTS(model=TTS_MODEL), openai.TTS(voice=FALLBACK_TTS_VOICE)]
-        ),
-        llm=openai.LLM(model=VOICE_MODEL),
-        vad=ctx.proc.userdata["vad"],
-        turn_handling={"endpointing": {"max_delay": MAX_END_OF_TURN_WAIT}},
-    )
-    agent = StoreAgent()
+    profile = _profile_name(os.environ.get("VOICE_PROFILE", ""))
+    options = session_options(os.environ.get("VOICE_PROFILE", ""), os.environ)
+    primary_tts = options.pop("primary_tts")
+    session = AgentSession(vad=ctx.proc.userdata["vad"], **options)
+    agent = StoreAgent(profile=profile, primary_tts=primary_tts, env=os.environ)
     turn: dict = {"user_metrics": None}
+
+
+    if profile == "bilingual":
+
+        @session.on("user_transcription_timeout")
+        def _on_transcription_timeout(_event) -> None:
+            try:
+                if agent.reply_language == "ar":
+                    session.say("معلش، مسمعتكش كويس. ممكن تقول تاني؟")
+                else:
+                    session.say("Sorry, I didn't catch that. Could you say it again?")
+            except Exception:
+                logger.exception("could not ask the shopper to repeat after transcription timeout")
 
     @session.on("conversation_item_added")
     def _on_item(event) -> None:
-        item = event.item
-        if getattr(item, "type", None) != "message":
-            return
-        if item.role == "user":
-            turn["user_metrics"] = dict(item.metrics)
-            agent.turn_lookups = []
-        elif item.role == "assistant" and turn["user_metrics"] is not None:
-            # Replies with no shopper turn before them (the greeting) get no x-ray.
-            trace = build_voice_trace(turn["user_metrics"], dict(item.metrics), agent.turn_lookups)
-            turn["user_metrics"] = None
-            agent.turn_lookups = []
-            if trace is not None:
-                asyncio.create_task(_publish_trace(session, trace))
+        try:
+            item = event.item
+            if getattr(item, "type", None) != "message":
+                return
+            if item.role == "user":
+                turn["user_metrics"] = dict(item.metrics)
+                agent.turn_lookups = []
+            elif item.role == "assistant" and turn["user_metrics"] is not None:
+                # Replies with no shopper turn before them (the greeting) get no x-ray.
+                trace = build_voice_trace(turn["user_metrics"], dict(item.metrics), agent.turn_lookups)
+                turn["user_metrics"] = None
+                agent.turn_lookups = []
+                if trace is not None:
+                    if profile == "bilingual":
+                        trace["turn_id"] = agent.turn_id
+                        trace["language"] = agent.reply_language
+                    asyncio.create_task(_publish_trace(session, trace))
+        except Exception:
+            logger.exception("could not process a conversation item")
 
     await session.start(agent=agent, room=ctx.room)
     asyncio.create_task(_say_goodbye_after_limit(session, ctx))
