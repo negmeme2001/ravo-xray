@@ -10,20 +10,22 @@ MAX_LLM_CALLS = 3
 
 BASE_RULES = (
     "You are the in-store assistant at a supermarket kiosk. Answer in 2 to 4 short "
-    "sentences. Reply in the shopper's language: use Egyptian Arabic when they write "
-    "or speak Arabic (English product names are fine inside an Arabic reply), and use "
-    "English when they use English. Always write search queries in English, translating "
+    "sentences. Reply in the language of the shopper's latest message, including when "
+    "you ask them to clarify: an English message gets an English reply, an Arabic one "
+    "an Egyptian Arabic reply (English product names are fine inside it). Always write "
+    "search queries in English, translating "
     "the shopper's words (for example, 'لبن شوفان' means 'oat milk'), because the catalog "
     "and documents are in English. For every clear shopping question, including broad "
     "ones like 'a healthy snack for my kids' or 'something for a cold', call "
     "search_products first and recommend only products it returns. Never suggest items "
     "from general knowledge that the search did not return, and never ask permission to "
-    "search: just search. If the message is unclear—random words, gibberish, or a sentence "
-    "cut off before the request, like 'do you have the'—do not search and do not guess. "
-    "Ask one short question in the shopper's language that offers two examples: a product "
-    "like milk or medicine, or a question about returns or delivery. If a clear request is "
-    "mixed with unrelated words, like 'banana table do you have milk', answer the clear "
-    "request; if two readings are plausible, confirm first. If you already asked the "
+    "search: just search. Look for a request anywhere in the message first: when one is "
+    "mixed with unrelated words, like 'banana table do you have milk' (the request is "
+    "milk), search for it and answer it; if two readings are plausible, confirm first. "
+    "Only when there is no request at all (random words, gibberish, or a sentence cut off "
+    "before the request, like 'do you have the') do not search and do not guess: ask one "
+    "short question in the shopper's language that offers two examples, a product like "
+    "milk or medicine, or a question about returns or delivery. If you already asked the "
     "shopper to clarify in your previous turn and the message is still unclear, suggest "
     "they tap one of the example questions or type it instead of asking the same question "
     "again. "
@@ -135,6 +137,17 @@ def cards_to_show(cards: list[dict], reply: str) -> list[dict]:
         for card in cards
         if card["similarity"] >= CONFIDENT_MATCH or product_type(card["name"]).lower() in reply_lower
     ]
+
+
+def language_instruction(text: str) -> str:
+    """The reply language for this turn, decided from the script of the shopper's words.
+
+    Left to the prompt alone, the model answered English and gibberish input in Arabic
+    (the store is Egyptian), so the code states the language for every turn.
+    """
+    if understanding.script_language(text) == "ar":
+        return "The shopper's latest message is in Arabic: reply in Egyptian Arabic."
+    return "The shopper's latest message is in English: reply in English."
 
 
 def _llm_step(label: str, ms: float) -> dict:
@@ -294,7 +307,8 @@ def run_turn(messages: list[dict]) -> dict:
         }
 
     client = get_openai_client()
-    conversation = [{"role": "system", "content": SYSTEM_PROMPT}] + list(messages)
+    system = SYSTEM_PROMPT + " " + language_instruction(user_text)
+    conversation = [{"role": "system", "content": system}] + list(messages)
     steps: list[dict] = []
     cards: dict[str, dict] = {}
     citations: list[dict] = []

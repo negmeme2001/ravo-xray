@@ -282,7 +282,7 @@ def test_prompt_rejects_unrelated_products():
 
 
 def test_prompt_has_language_query_and_unclear_input_rules():
-    assert "Reply in the shopper's language" in assistant.BASE_RULES
+    assert "Reply in the language of the shopper's latest message" in assistant.BASE_RULES
     assert "search queries in English" in assistant.BASE_RULES
     assert "do not search and do not guess" in assistant.BASE_RULES
 
@@ -354,3 +354,18 @@ def test_render_products_flags_weak_results():
 def test_render_products_leaves_confident_results_alone():
     text = assistant.render_products([_product("Domty Oat Milk", 0.68), _product("Beyti Cooler Bag", 0.2)])
     assert assistant.WEAK_MATCH_NOTE not in text
+
+
+def _system_prompt_for(question, monkeypatch):
+    client = _install_client(monkeypatch, [_Response(content="ok")])
+    assistant.run_turn([{"role": "user", "content": question}])
+    return client.chat.completions.create_calls[0]["messages"][0]["content"]
+
+
+def test_english_and_gibberish_input_are_told_to_get_english_replies(monkeypatch):
+    assert "reply in English" in _system_prompt_for("Do you have the", monkeypatch)
+    assert "reply in English" in _system_prompt_for("asdf", monkeypatch)
+
+
+def test_arabic_input_is_told_to_get_an_arabic_reply(monkeypatch):
+    assert "reply in Egyptian Arabic" in _system_prompt_for("عندكم لبن شوفان؟", monkeypatch)
