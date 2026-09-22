@@ -67,6 +67,13 @@ def _install_client(monkeypatch, responses):
     return client
 
 
+def _reject_client_call(monkeypatch):
+    def reject():
+        raise AssertionError("OpenAI client must not be created")
+
+    monkeypatch.setattr(assistant, "get_openai_client", reject)
+
+
 def _tool_messages(client):
     return [
         message
@@ -272,6 +279,47 @@ def test_cards_to_show_keeps_confident_and_named_cards():
 def test_prompt_rejects_unrelated_products():
     assert "offer something else" not in assistant.BASE_RULES
     assert "doesn't sell" in assistant.BASE_RULES
+
+
+def test_prompt_has_language_query_and_unclear_input_rules():
+    assert "Reply in the shopper's language" in assistant.BASE_RULES
+    assert "search queries in English" in assistant.BASE_RULES
+    assert "do not search and do not guess" in assistant.BASE_RULES
+
+
+def test_filler_only_returns_arabic_clarification_without_openai(monkeypatch):
+    _reject_client_call(monkeypatch)
+
+    result = assistant.run_turn([{"role": "user", "content": "umm… يعني…"}])
+
+    assert result["reply"] == (
+        "معلش، مفهمتش قصدك. بتدور على منتج زي اللبن أو الدوا، ولا عندك سؤال عن "
+        "الترجيع أو التوصيل؟"
+    )
+    assert result["cards"] == []
+    assert result["citations"] == []
+    assert result["trace"]["steps"] == [
+        {
+            "kind": "llm",
+            "label": "Check the question",
+            "ms": result["trace"]["steps"][0]["ms"],
+            "cache": None,
+            "tool": None,
+        }
+    ]
+
+
+def test_empty_returns_english_clarification_without_openai(monkeypatch):
+    _reject_client_call(monkeypatch)
+
+    result = assistant.run_turn([{"role": "user", "content": "   ".strip()}])
+
+    assert result["reply"] == (
+        "Sorry, I didn't catch that. Are you looking for a product, like milk or medicine, "
+        "or asking about returns or delivery?"
+    )
+    assert result["cards"] == []
+    assert result["citations"] == []
 
 
 def test_weak_search_results_unnamed_in_reply_yield_no_cards(monkeypatch):
