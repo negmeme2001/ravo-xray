@@ -41,8 +41,9 @@ class _FakeModel:
 
 
 class _FakeFallback:
-    def __init__(self, models):
+    def __init__(self, models, **options):
         self.models = models
+        self.options = options
 
 
 @pytest.fixture
@@ -102,6 +103,10 @@ def test_bilingual_session_options_use_default_stt(fake_voice_backends):
 
     assert options["stt"].models[0].options["model"] == "xai/stt-1"
     assert "language" not in options["stt"].models[0].options
+    # A stalled gateway connect is dropped fast and retried, not waited on for 10 s.
+    assert options["stt"].options == {
+        "attempt_timeout": 3.0, "max_retry_per_stt": 3, "retry_interval": 0.5,
+    }
 
 
 class _FakeSwitchableTTS:
@@ -170,18 +175,52 @@ def test_bilingual_turn_uses_the_arabic_voice_for_arabic_text():
     assert primary_tts.calls == [{"language": "ar", "voice": "arabic-voice"}]
 
 
-def test_bilingual_turn_tells_the_model_the_reply_language():
+def test_bilingual_turn_leaves_the_turn_context_unchanged():
+    # Editing it would discard the reply drafted while the shopper finishes speaking.
     store, _, _ = _store_with_session()
     turn_ctx = agents_llm.ChatContext()
+    turn_ctx.add_message(role="user", content="Do you have the")
 
     asyncio.run(
         store.on_user_turn_completed(turn_ctx, types.SimpleNamespace(text_content="Do you have the"))
     )
 
-    assert any(
-        item.role == "system" and "reply in English" in (item.text_content or "")
-        for item in turn_ctx.items
-    )
+    assert [item.role for item in turn_ctx.items] == ["user"]
+
+
+def _generate(store, chat_ctx, monkeypatch):
+    seen = {}
+
+    async def fake_default_llm_node(agent_, ctx, tools, model_settings):
+        seen["ctx"] = ctx
+        yield "ok"
+
+    monkeypatch.setattr(agent.Agent.default, "llm_node", fake_default_llm_node)
+
+    async def run():
+        return [chunk async for chunk in store.llm_node(chat_ctx, [], None)]
+
+    assert asyncio.run(run()) == ["ok"]
+    return seen["ctx"]
+
+
+def test_bilingual_generation_states_the_reply_language(monkeypatch):
+    store, _, _ = _store_with_session()
+    chat_ctx = agents_llm.ChatContext()
+    chat_ctx.add_message(role="user", content="عندكم لبن شوفان؟")
+
+    sent = _generate(store, chat_ctx, monkeypatch)
+
+    assert "reply in Egyptian Arabic" in sent.items[-1].text_content
+    assert [item.role for item in chat_ctx.items] == ["user"]
+
+
+def test_legacy_generation_is_unchanged(monkeypatch):
+    store, _, _ = _store_with_session(profile="legacy")
+    chat_ctx = agents_llm.ChatContext()
+    chat_ctx.add_message(role="user", content="Do you have milk?")
+
+    assert _generate(store, chat_ctx, monkeypatch) is chat_ctx
 
 
 def test_legacy_turn_hook_is_a_noop():

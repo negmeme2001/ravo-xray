@@ -56,6 +56,12 @@ TEST_ROOM_PREFIX = "vt-"
 # The STT bake-off (voicetest/stt_bench.py) winner: the only candidate that heard English as
 # well as flux and also heard Arabic. Speechmatics with ar_en dropped English speech entirely.
 BILINGUAL_STT_MODEL = "xai/stt-1"
+# A connect to the inference gateway usually takes ~0.5 s but now and then stalls for 10-20 s.
+# Drop a stalled one fast and retry (audio waits in the stream meanwhile); the 10 s default
+# with one retry lost the shopper's whole first sentence.
+BILINGUAL_STT_ATTEMPT_TIMEOUT = 3.0
+BILINGUAL_STT_RETRIES = 3
+BILINGUAL_STT_RETRY_INTERVAL = 0.5
 BASE_RULES = assistant.BASE_RULES
 SEARCH_LABELS = {"search_products": "Search products", "search_documents": "Search documents"}
 
@@ -94,7 +100,12 @@ def _voice_stt(profile: str, env: Mapping[str, str]) -> agents_stt.STT:
     if language := env.get("VOICE_STT_LANGUAGE"):
         stt_options["language"] = language
     bilingual_stt = inference.STT(**stt_options)
-    return agents_stt.FallbackAdapter([bilingual_stt, legacy_stt])
+    return agents_stt.FallbackAdapter(
+        [bilingual_stt, legacy_stt],
+        attempt_timeout=BILINGUAL_STT_ATTEMPT_TIMEOUT,
+        max_retry_per_stt=BILINGUAL_STT_RETRIES,
+        retry_interval=BILINGUAL_STT_RETRY_INTERVAL,
+    )
 
 
 def _turn_handling(profile: str) -> dict:
@@ -240,6 +251,13 @@ async def _publish_trace(session: AgentSession, trace: dict) -> None:
     await _send_json(session, TRACE_TOPIC, trace)
 
 
+def _latest_user_text(chat_ctx: agents_llm.ChatContext) -> str:
+    for item in reversed(chat_ctx.items):
+        if getattr(item, "type", None) == "message" and item.role == "user":
+            return item.text_content or ""
+    return ""
+
+
 class StoreAgent(Agent):
     def __init__(
         self,
@@ -279,9 +297,24 @@ class StoreAgent(Agent):
         if understanding.classify(text) in {understanding.EMPTY, understanding.FILLER_ONLY}:
             self.session.say(understanding.clarification(self.reply_language))
             raise StopResponse
-        # Left to the prompt, the model answers English in Arabic (the store is
-        # Egyptian), so each turn states the reply language, as the typed chat does.
-        turn_ctx.add_message(role="system", content=assistant.language_instruction(text))
+
+    async def llm_node(
+        self,
+        chat_ctx: agents_llm.ChatContext,
+        tools: list,
+        model_settings,
+    ):
+        if self.profile == "bilingual":
+            # Left to the prompt, the model answers English in Arabic (the store is Egyptian),
+            # so each generation states the reply language, as the typed chat does. It goes on
+            # a copy here, not into the turn in on_user_turn_completed: editing the turn there
+            # discards the reply the agent starts drafting while the shopper finishes.
+            chat_ctx = chat_ctx.copy()
+            chat_ctx.add_message(
+                role="system", content=assistant.language_instruction(_latest_user_text(chat_ctx))
+            )
+        async for chunk in Agent.default.llm_node(self, chat_ctx, tools, model_settings):
+            yield chunk
 
     @function_tool
     async def search_products(self, query: str) -> str:

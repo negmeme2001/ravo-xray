@@ -166,9 +166,20 @@ async def run_session(
             trace_steps = payload.get("steps", [])
             result_updated_at = time.perf_counter()
 
-    room.register_text_stream_handler("lk.transcription", transcription_handler)
-    room.register_text_stream_handler("ravo.cards", cards_handler)
-    room.register_text_stream_handler("ravo.trace", trace_handler)
+    stream_tasks: set[asyncio.Task[None]] = set()
+
+    def in_task(handler: Any) -> Any:
+        # The room calls stream handlers synchronously; an async one would never be awaited.
+        def start(reader: Any, participant_identity: str) -> None:
+            task = asyncio.create_task(handler(reader, participant_identity))
+            stream_tasks.add(task)
+            task.add_done_callback(stream_tasks.discard)
+
+        return start
+
+    room.register_text_stream_handler("lk.transcription", in_task(transcription_handler))
+    room.register_text_stream_handler("ravo.cards", in_task(cards_handler))
+    room.register_text_stream_handler("ravo.trace", in_task(trace_handler))
 
     @room.on("track_subscribed")
     def on_track_subscribed(track: rtc.Track, _publication: Any, _participant: Any) -> None:
@@ -216,7 +227,7 @@ async def run_session(
         if feeder is not None:
             await frames.put(None)
             await feeder
-        for task in audio_tasks:
+        for task in (*audio_tasks, *stream_tasks):
             task.cancel()
         await room.disconnect()
 
