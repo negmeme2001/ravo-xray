@@ -66,7 +66,8 @@ VOICE_RMS_THRESHOLD = 500
 
 def pcm_rms(data: bytes | memoryview | Sequence[int]) -> float:
     if isinstance(data, (bytes, bytearray, memoryview)):
-        samples = memoryview(data).cast("h")
+        # LiveKit hands over frames already typed as int16; go through bytes to cast either kind.
+        samples = memoryview(data).cast("B").cast("h")
     else:
         samples = data
     if not samples:

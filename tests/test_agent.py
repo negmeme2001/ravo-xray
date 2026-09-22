@@ -100,8 +100,8 @@ def test_bilingual_session_options_and_environment_overrides(fake_voice_backends
 def test_bilingual_session_options_use_default_stt(fake_voice_backends):
     options = agent.session_options("bilingual", {})
 
-    assert options["stt"].models[0].options["model"] == "speechmatics/linden-1"
-    assert options["stt"].models[0].options["language"] == "ar_en"
+    assert options["stt"].models[0].options["model"] == "xai/stt-1"
+    assert "language" not in options["stt"].models[0].options
 
 
 class _FakeSwitchableTTS:

@@ -64,3 +64,13 @@ def test_speech_span_ignores_leading_and_trailing_silence():
 def test_speech_span_of_silence_covers_the_whole_clip():
     from voicetest.audio import speech_span
     assert speech_span(_frames(False, False, False)) == (0, 2)
+
+
+def test_pcm_rms_reads_int16_frames_as_livekit_sends_them():
+    from array import array
+
+    from voicetest.audio import pcm_rms
+
+    samples = array("h", [1000, -1000] * 120)
+    assert pcm_rms(memoryview(samples)) == pytest.approx(1000.0)
+    assert pcm_rms(samples.tobytes()) == pytest.approx(1000.0)

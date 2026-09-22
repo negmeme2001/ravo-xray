@@ -53,6 +53,9 @@ TRACE_TOPIC = "ravo.trace"
 # Rooms the voice test suite opens (the site uses "rx-"); their answers stay out of
 # the live monitor so a test run never fills the demo's film roll.
 TEST_ROOM_PREFIX = "vt-"
+# The STT bake-off (voicetest/stt_bench.py) winner: the only candidate that heard English as
+# well as flux and also heard Arabic. Speechmatics with ar_en dropped English speech entirely.
+BILINGUAL_STT_MODEL = "xai/stt-1"
 BASE_RULES = assistant.BASE_RULES
 SEARCH_LABELS = {"search_products": "Search products", "search_documents": "Search documents"}
 
@@ -86,10 +89,11 @@ def _voice_stt(profile: str, env: Mapping[str, str]) -> agents_stt.STT:
     legacy_stt = inference.STT(model=STT_MODEL, language="en")
     if profile == "legacy":
         return legacy_stt
-    bilingual_stt = inference.STT(
-        model=env.get("VOICE_STT_MODEL") or "speechmatics/linden-1",
-        language=env.get("VOICE_STT_LANGUAGE") or "ar_en",
-    )
+    stt_options = {"model": env.get("VOICE_STT_MODEL") or BILINGUAL_STT_MODEL}
+    # Left unset, the model detects the language itself, which code-switching needs.
+    if language := env.get("VOICE_STT_LANGUAGE"):
+        stt_options["language"] = language
+    bilingual_stt = inference.STT(**stt_options)
     return agents_stt.FallbackAdapter([bilingual_stt, legacy_stt])
 
 
