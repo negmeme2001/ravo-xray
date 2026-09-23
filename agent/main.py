@@ -61,14 +61,20 @@ TRACE_TOPIC = "ravo.trace"
 # Rooms the voice test suite opens (the site uses "rx-"); their answers stay out of
 # the live monitor so a test run never fills the demo's film roll.
 TEST_ROOM_PREFIX = "vt-"
-# The STT bake-off (voicetest/stt_bench.py) winner: the only candidate that heard English as
-# well as flux and also heard Arabic. Speechmatics with ar_en dropped English speech entirely.
-BILINGUAL_STT_MODEL = "xai/stt-1"
+# Real Egyptian Arabic sank the fast call-center transcribers (xAI guessed the language per
+# utterance and wrote Arabic as English sounds). OpenAI's LLM-grade live transcriber, told to
+# expect Arabic and English together, was the first to get mixed speech like "Do you have
+# حاجة للبرد" right. "openai/..." models run through the OpenAI plugin, others through
+# LiveKit Inference. VOICE_STT_MODEL / VOICE_STT_LANGUAGE (comma separated) override it.
+BILINGUAL_STT_MODEL = "openai/gpt-live-transcribe"
+BILINGUAL_STT_LANGUAGES = ["ar", "en"]
+# Store words the transcriber should spell right (brand names are English in Arabic speech).
+STT_KEYWORDS = ["Beyti", "Domty", "Juhayna", "President", "Panda", "Nestle", "Premium Select", "oat milk"]
 # Backup when the primary provider is down. It must understand Arabic too: a call stays on
 # the backup even after the primary recovers, and an English-only backup (flux, now the last
 # resort) turned a whole Arabic conversation into English gibberish during an xAI outage.
-# Second in the STT bake-off for Arabic + English. VOICE_STT_BACKUP_MODEL overrides it.
-BILINGUAL_STT_BACKUP_MODEL = "google/gemini-3.5-transcribe-live"
+# A different provider than the primary that still hears Arabic. VOICE_STT_BACKUP_MODEL overrides it.
+BILINGUAL_STT_BACKUP_MODEL = "xai/stt-1"
 # A connect to the inference gateway usually takes ~0.5 s but now and then stalls for 10-20 s.
 # Drop a stalled one fast and retry (audio waits in the stream meanwhile); the 10 s default
 # with one retry lost the shopper's whole first sentence.
@@ -108,11 +114,17 @@ def _voice_stt(profile: str, env: Mapping[str, str]) -> agents_stt.STT:
     legacy_stt = inference.STT(model=STT_MODEL, language="en")
     if profile == "legacy":
         return legacy_stt
-    stt_options = {"model": env.get("VOICE_STT_MODEL") or BILINGUAL_STT_MODEL}
-    # Left unset, the model detects the language itself, which code-switching needs.
-    if language := env.get("VOICE_STT_LANGUAGE"):
-        stt_options["language"] = language
-    bilingual_stt = inference.STT(**stt_options)
+    model = env.get("VOICE_STT_MODEL") or BILINGUAL_STT_MODEL
+    language = env.get("VOICE_STT_LANGUAGE")
+    if model.startswith("openai/"):
+        languages = language.split(",") if language else BILINGUAL_STT_LANGUAGES
+        bilingual_stt = openai.STT(model=model.removeprefix("openai/"), language=languages, keywords=STT_KEYWORDS)
+    else:
+        stt_options = {"model": model}
+        # Left unset, the model detects the language itself, which code-switching needs.
+        if language:
+            stt_options["language"] = language
+        bilingual_stt = inference.STT(**stt_options)
     backup_stt = inference.STT(model=env.get("VOICE_STT_BACKUP_MODEL") or BILINGUAL_STT_BACKUP_MODEL)
     return agents_stt.FallbackAdapter(
         [bilingual_stt, backup_stt, legacy_stt],

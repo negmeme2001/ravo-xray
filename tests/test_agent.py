@@ -54,6 +54,7 @@ def fake_voice_backends(monkeypatch):
     monkeypatch.setattr(agent.agents_stt, "FallbackAdapter", _FakeFallback)
     monkeypatch.setattr(agent.agents_tts, "FallbackAdapter", _FakeFallback)
     monkeypatch.setattr(agent.openai, "TTS", _FakeModel)
+    monkeypatch.setattr(agent.openai, "STT", _FakeModel)
     monkeypatch.setattr(agent.openai, "LLM", _FakeModel)
 
 
@@ -86,7 +87,7 @@ def test_bilingual_session_options_and_environment_overrides(fake_voice_backends
 
     assert options["stt"].models[0].options["model"] == "custom/stt"
     assert options["stt"].models[0].options["language"] == "ar_custom"
-    assert options["stt"].models[1].options["model"] == "google/gemini-3.5-transcribe-live"
+    assert options["stt"].models[1].options["model"] == "xai/stt-1"
     assert options["stt"].models[2].options["model"] == "deepgram/flux-general-en"
     assert options["primary_tts"].options["language"] == "en"
     assert options["primary_tts"].options["voice"] == "english-voice"
@@ -105,8 +106,11 @@ def test_bilingual_session_options_and_environment_overrides(fake_voice_backends
 def test_bilingual_session_options_use_default_stt(fake_voice_backends):
     options = agent.session_options("bilingual", {})
 
-    assert options["stt"].models[0].options["model"] == "xai/stt-1"
-    assert "language" not in options["stt"].models[0].options
+    # OpenAI's live transcriber, told to expect Arabic and English together.
+    assert options["stt"].models[0].options["model"] == "gpt-live-transcribe"
+    assert options["stt"].models[0].options["language"] == ["ar", "en"]
+    assert "Beyti" in options["stt"].models[0].options["keywords"]
+    assert options["stt"].models[1].options["model"] == "xai/stt-1"
     # A stalled gateway connect is dropped fast and retried, not waited on for 10 s.
     assert options["stt"].options == {
         "attempt_timeout": 3.0, "max_retry_per_stt": 3, "retry_interval": 0.5,
@@ -469,5 +473,14 @@ def test_backup_speech_model_can_be_overridden(fake_voice_backends):
     options = agent.session_options("bilingual", {"VOICE_STT_BACKUP_MODEL": "speechmatics/enhanced"})
 
     assert [m.options["model"] for m in options["stt"].models] == [
-        "xai/stt-1", "speechmatics/enhanced", "deepgram/flux-general-en",
+        "gpt-live-transcribe", "speechmatics/enhanced", "deepgram/flux-general-en",
     ]
+
+
+def test_openai_transcriber_languages_come_from_the_environment(fake_voice_backends):
+    options = agent.session_options(
+        "bilingual", {"VOICE_STT_MODEL": "openai/gpt-4o-transcribe", "VOICE_STT_LANGUAGE": "ar"}
+    )
+
+    assert options["stt"].models[0].options["model"] == "gpt-4o-transcribe"
+    assert options["stt"].models[0].options["language"] == ["ar"]
