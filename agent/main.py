@@ -64,6 +64,11 @@ TEST_ROOM_PREFIX = "vt-"
 # The STT bake-off (voicetest/stt_bench.py) winner: the only candidate that heard English as
 # well as flux and also heard Arabic. Speechmatics with ar_en dropped English speech entirely.
 BILINGUAL_STT_MODEL = "xai/stt-1"
+# Backup when the primary provider is down. It must understand Arabic too: a call stays on
+# the backup even after the primary recovers, and an English-only backup (flux, now the last
+# resort) turned a whole Arabic conversation into English gibberish during an xAI outage.
+# Second in the STT bake-off for Arabic + English. VOICE_STT_BACKUP_MODEL overrides it.
+BILINGUAL_STT_BACKUP_MODEL = "google/gemini-3.5-transcribe-live"
 # A connect to the inference gateway usually takes ~0.5 s but now and then stalls for 10-20 s.
 # Drop a stalled one fast and retry (audio waits in the stream meanwhile); the 10 s default
 # with one retry lost the shopper's whole first sentence.
@@ -108,8 +113,9 @@ def _voice_stt(profile: str, env: Mapping[str, str]) -> agents_stt.STT:
     if language := env.get("VOICE_STT_LANGUAGE"):
         stt_options["language"] = language
     bilingual_stt = inference.STT(**stt_options)
+    backup_stt = inference.STT(model=env.get("VOICE_STT_BACKUP_MODEL") or BILINGUAL_STT_BACKUP_MODEL)
     return agents_stt.FallbackAdapter(
-        [bilingual_stt, legacy_stt],
+        [bilingual_stt, backup_stt, legacy_stt],
         attempt_timeout=BILINGUAL_STT_ATTEMPT_TIMEOUT,
         max_retry_per_stt=BILINGUAL_STT_RETRIES,
         retry_interval=BILINGUAL_STT_RETRY_INTERVAL,
