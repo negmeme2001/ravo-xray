@@ -38,15 +38,23 @@ FALLBACK_TTS_VOICE = "ash"
 MAX_END_OF_TURN_WAIT = 1.2
 # Dynamic endpointing adapts its wait to the speaker.
 BILINGUAL_ENDPOINTING_MODE = "dynamic"
-# A short hesitation should not immediately end a bilingual turn.
+# Wait after a sentence the turn detector judges finished. VOICE_MIN_DELAY overrides it.
 BILINGUAL_MIN_END_OF_TURN_WAIT = 0.5
-# Three seconds gives a two-second pause margin on the first turn.
-BILINGUAL_MAX_END_OF_TURN_WAIT = 3.0
+# Wait after a sentence it judges unfinished ("Do you have..."). At 3 s the agent answered
+# half sentences mid-thought; the detector also misjudges some finished ones as unfinished,
+# so this is also the worst-case silence after a question. VOICE_MAX_DELAY overrides it.
+BILINGUAL_MAX_END_OF_TURN_WAIT = 4.5
+# The turn detector scores how finished a sentence sounds; below this it waits the long delay.
+# Its default (0.36) let half sentences like "Do you have..." (scored 0.37-0.39) through as
+# finished, while finished ones scored 0.46+. VOICE_EOT_THRESHOLD overrides it.
+BILINGUAL_EOT_THRESHOLD = 0.43
 # False interruptions may resume for two seconds before the reply is discarded.
 BILINGUAL_RESUME_FALSE_INTERRUPTION = True
 BILINGUAL_FALSE_INTERRUPTION_TIMEOUT = 2.0
-# Three seconds lets a bilingual transcript arrive after the shopper stops.
-BILINGUAL_TRANSCRIPTION_TIMEOUT = 3.0
+# "Didn't catch that" when speech brings no text. It starts on every pause, so it must
+# outlast the longest thinking pause; at 3 s it spoke over shoppers mid-sentence.
+# VOICE_TRANSCRIPTION_TIMEOUT overrides it.
+BILINGUAL_TRANSCRIPTION_TIMEOUT = 8.0
 MAX_PRODUCTS_FOR_VOICE = 5
 CARDS_TOPIC = "ravo.cards"
 TRACE_TOPIC = "ravo.trace"
@@ -108,14 +116,26 @@ def _voice_stt(profile: str, env: Mapping[str, str]) -> agents_stt.STT:
     )
 
 
-def _turn_handling(profile: str) -> dict:
+def _env_seconds(env: Mapping[str, str], key: str, default: float) -> float:
+    try:
+        value = float(env.get(key) or default)
+    except ValueError:
+        logger.warning("ignoring %s=%r; using %s", key, env.get(key), default)
+        return default
+    return value if value > 0 else default
+
+
+def _turn_handling(profile: str, env: Mapping[str, str]) -> dict:
     if profile == "legacy":
         return {"endpointing": {"max_delay": MAX_END_OF_TURN_WAIT}}
     return {
+        "turn_detection": inference.TurnDetector(
+            unlikely_threshold=_env_seconds(env, "VOICE_EOT_THRESHOLD", BILINGUAL_EOT_THRESHOLD)
+        ),
         "endpointing": {
             "mode": BILINGUAL_ENDPOINTING_MODE,
-            "min_delay": BILINGUAL_MIN_END_OF_TURN_WAIT,
-            "max_delay": BILINGUAL_MAX_END_OF_TURN_WAIT,
+            "min_delay": _env_seconds(env, "VOICE_MIN_DELAY", BILINGUAL_MIN_END_OF_TURN_WAIT),
+            "max_delay": _env_seconds(env, "VOICE_MAX_DELAY", BILINGUAL_MAX_END_OF_TURN_WAIT),
         },
         "interruption": {
             "resume_false_interruption": BILINGUAL_RESUME_FALSE_INTERRUPTION,
@@ -141,11 +161,13 @@ def session_options(profile: str, env: Mapping[str, str]) -> dict:
             ]
         ),
         "llm": openai.LLM(model=VOICE_MODEL),
-        "turn_handling": _turn_handling(selected_profile),
+        "turn_handling": _turn_handling(selected_profile, env),
         "primary_tts": primary_tts,
     }
     if selected_profile == "bilingual":
-        options["transcription_timeout"] = BILINGUAL_TRANSCRIPTION_TIMEOUT
+        options["transcription_timeout"] = _env_seconds(
+            env, "VOICE_TRANSCRIPTION_TIMEOUT", BILINGUAL_TRANSCRIPTION_TIMEOUT
+        )
     return options
 
 

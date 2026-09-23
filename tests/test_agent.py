@@ -50,6 +50,7 @@ class _FakeFallback:
 def fake_voice_backends(monkeypatch):
     monkeypatch.setattr(agent.inference, "STT", _FakeModel)
     monkeypatch.setattr(agent.inference, "TTS", _FakeModel)
+    monkeypatch.setattr(agent.inference, "TurnDetector", _FakeModel)
     monkeypatch.setattr(agent.agents_stt, "FallbackAdapter", _FakeFallback)
     monkeypatch.setattr(agent.agents_tts, "FallbackAdapter", _FakeFallback)
     monkeypatch.setattr(agent.openai, "TTS", _FakeModel)
@@ -88,14 +89,16 @@ def test_bilingual_session_options_and_environment_overrides(fake_voice_backends
     assert options["stt"].models[1].options["model"] == "deepgram/flux-general-en"
     assert options["primary_tts"].options["language"] == "en"
     assert options["primary_tts"].options["voice"] == "english-voice"
-    assert options["turn_handling"] == {
-        "endpointing": {"mode": "dynamic", "min_delay": 0.5, "max_delay": 3.0},
+    turn_handling = dict(options["turn_handling"])
+    assert turn_handling.pop("turn_detection").options == {"unlikely_threshold": 0.43}
+    assert turn_handling == {
+        "endpointing": {"mode": "dynamic", "min_delay": 0.5, "max_delay": 4.5},
         "interruption": {
             "resume_false_interruption": True,
             "false_interruption_timeout": 2.0,
         },
     }
-    assert options["transcription_timeout"] == 3.0
+    assert options["transcription_timeout"] == 8.0
 
 
 def test_bilingual_session_options_use_default_stt(fake_voice_backends):
@@ -438,3 +441,24 @@ def test_publish_trace_skips_the_monitor_in_test_rooms(monkeypatch):
     asyncio.run(agent._publish_trace(session, trace))
 
     assert sent["payload"]["monitor_id"] is None
+
+
+def test_pause_settings_can_be_tuned_from_the_environment(fake_voice_backends):
+    options = agent.session_options(
+        "bilingual",
+        {"VOICE_MIN_DELAY": "0.9", "VOICE_MAX_DELAY": "7", "VOICE_TRANSCRIPTION_TIMEOUT": "10",
+         "VOICE_EOT_THRESHOLD": "0.5"},
+    )
+
+    assert options["turn_handling"]["turn_detection"].options == {"unlikely_threshold": 0.5}
+
+    assert options["turn_handling"]["endpointing"]["min_delay"] == 0.9
+    assert options["turn_handling"]["endpointing"]["max_delay"] == 7.0
+    assert options["transcription_timeout"] == 10.0
+
+
+def test_bad_pause_settings_fall_back_to_the_defaults(fake_voice_backends):
+    options = agent.session_options("bilingual", {"VOICE_MAX_DELAY": "soon", "VOICE_MIN_DELAY": "0"})
+
+    assert options["turn_handling"]["endpointing"]["max_delay"] == 4.5
+    assert options["turn_handling"]["endpointing"]["min_delay"] == 0.5
