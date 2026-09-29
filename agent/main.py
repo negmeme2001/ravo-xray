@@ -17,176 +17,29 @@ from livekit.agents import (
     WorkerOptions,
     cli,
     function_tool,
-    inference,
 )
 from livekit.agents import llm as agents_llm
-from livekit.agents import stt as agents_stt
 from livekit.agents import tts as agents_tts
-from livekit.plugins import openai, silero
+from livekit.plugins import silero
 
+from agent import config as voice_config
+from agent.trace import build_voice_trace
 from ravo_core import assistant, monitor, tools, understanding
+from ravo_core.prompts import get, message
 
-AGENT_NAME = os.getenv("VOICE_AGENT_NAME", "ravo-xray")
+AGENT_NAME = voice_config.AGENT_NAME
 SESSION_LIMIT_SECONDS = 180
-VOICE_MODEL = "gpt-4.1-mini"
-# The agent runs in eu-central, where LiveKit Inference serves only models with
-# an EU endpoint (Inworld has none, so its sessions fail with REGION_RESTRICTED).
-STT_MODEL = "deepgram/flux-general-en"
-TTS_MODEL = "cartesia/sonic-3"
-FALLBACK_TTS_VOICE = "ash"
-# The legacy profile commits a hesitating detector after 1.2 seconds.
-MAX_END_OF_TURN_WAIT = 1.2
-# Dynamic endpointing adapts its wait to the speaker.
-BILINGUAL_ENDPOINTING_MODE = "dynamic"
-# Wait after a sentence the turn detector judges finished. VOICE_MIN_DELAY overrides it.
-BILINGUAL_MIN_END_OF_TURN_WAIT = 0.5
-# Wait after a sentence it judges unfinished ("Do you have..."). At 3 s the agent answered
-# half sentences mid-thought; the detector also misjudges some finished ones as unfinished,
-# so this is also the worst-case silence after a question. VOICE_MAX_DELAY overrides it.
-BILINGUAL_MAX_END_OF_TURN_WAIT = 4.5
-# The turn detector scores how finished a sentence sounds; below this it waits the long delay.
-# Its default (0.36) let half sentences like "Do you have..." (scored 0.37-0.39) through as
-# finished, while finished ones scored 0.46+. VOICE_EOT_THRESHOLD overrides it.
-BILINGUAL_EOT_THRESHOLD = 0.43
-# False interruptions may resume for two seconds before the reply is discarded.
-BILINGUAL_RESUME_FALSE_INTERRUPTION = True
-BILINGUAL_FALSE_INTERRUPTION_TIMEOUT = 2.0
-# "Didn't catch that" when speech brings no text. It starts on every pause, so it must
-# outlast the longest thinking pause; at 3 s it spoke over shoppers mid-sentence.
-# VOICE_TRANSCRIPTION_TIMEOUT overrides it.
-BILINGUAL_TRANSCRIPTION_TIMEOUT = 8.0
 MAX_PRODUCTS_FOR_VOICE = 5
 CARDS_TOPIC = "ravo.cards"
 TRACE_TOPIC = "ravo.trace"
 # Rooms the voice test suite opens (the site uses "rx-"); their answers stay out of
 # the live monitor so a test run never fills the demo's film roll.
 TEST_ROOM_PREFIX = "vt-"
-# Real Egyptian Arabic sank the fast call-center transcribers (xAI guessed the language per
-# utterance and wrote Arabic as English sounds). OpenAI's LLM-grade live transcriber, told to
-# expect Arabic and English together, was the first to get mixed speech like "Do you have
-# حاجة للبرد" right. "openai/..." models run through the OpenAI plugin, others through
-# LiveKit Inference. VOICE_STT_MODEL / VOICE_STT_LANGUAGE (comma separated) override it.
-BILINGUAL_STT_MODEL = "openai/gpt-live-transcribe"
-BILINGUAL_STT_LANGUAGES = ["ar", "en"]
-# Store words the transcriber should spell right (brand names are English in Arabic speech).
-STT_KEYWORDS = ["Beyti", "Domty", "Juhayna", "President", "Panda", "Nestle", "Premium Select", "oat milk"]
-# Backup when the primary provider is down. It must understand Arabic too: a call stays on
-# the backup even after the primary recovers, and an English-only backup (flux, now the last
-# resort) turned a whole Arabic conversation into English gibberish during an xAI outage.
-# A different provider than the primary that still hears Arabic. VOICE_STT_BACKUP_MODEL overrides it.
-BILINGUAL_STT_BACKUP_MODEL = "xai/stt-1"
-# A connect to the inference gateway usually takes ~0.5 s but now and then stalls for 10-20 s.
-# Drop a stalled one fast and retry (audio waits in the stream meanwhile); the 10 s default
-# with one retry lost the shopper's whole first sentence.
-BILINGUAL_STT_ATTEMPT_TIMEOUT = 3.0
-BILINGUAL_STT_RETRIES = 3
-BILINGUAL_STT_RETRY_INTERVAL = 0.5
 BASE_RULES = assistant.BASE_RULES
-SEARCH_LABELS = {"search_products": "Search products", "search_documents": "Search documents"}
 
 logger = logging.getLogger(__name__)
 
-VOICE_PROMPT = assistant.BASE_RULES + (
-    " Your reply is spoken aloud, so say no lists, no markdown and no symbols. "
-    "Use one or two short sentences. Say prices naturally and always name the "
-    "currency: 'about sixty-five pounds' is wrong, say 'sixty-five Egyptian "
-    "pounds'. In Arabic replies, say prices in Egyptian Arabic words with "
-    "'جنيه', for example 'خمسة وستين جنيه'."
-)
-
-
-def _profile_name(profile: str) -> str:
-    if profile == "bilingual":
-        return "bilingual"
-    return "legacy"
-
-
-def _primary_cartesia_tts(profile: str, env: Mapping[str, str]) -> agents_tts.TTS:
-    tts_options: dict[str, str] = {"model": TTS_MODEL}
-    if profile == "bilingual":
-        tts_options["language"] = "en"
-        if english_voice := env.get("VOICE_TTS_VOICE_EN"):
-            tts_options["voice"] = english_voice
-    return inference.TTS(**tts_options)
-
-
-def _voice_stt(profile: str, env: Mapping[str, str]) -> agents_stt.STT:
-    legacy_stt = inference.STT(model=STT_MODEL, language="en")
-    if profile == "legacy":
-        return legacy_stt
-    model = env.get("VOICE_STT_MODEL") or BILINGUAL_STT_MODEL
-    language = env.get("VOICE_STT_LANGUAGE")
-    if model.startswith("openai/"):
-        languages = language.split(",") if language else BILINGUAL_STT_LANGUAGES
-        bilingual_stt = openai.STT(model=model.removeprefix("openai/"), language=languages, keywords=STT_KEYWORDS)
-    else:
-        stt_options = {"model": model}
-        # Left unset, the model detects the language itself, which code-switching needs.
-        if language:
-            stt_options["language"] = language
-        bilingual_stt = inference.STT(**stt_options)
-    backup_stt = inference.STT(model=env.get("VOICE_STT_BACKUP_MODEL") or BILINGUAL_STT_BACKUP_MODEL)
-    return agents_stt.FallbackAdapter(
-        [bilingual_stt, backup_stt, legacy_stt],
-        attempt_timeout=BILINGUAL_STT_ATTEMPT_TIMEOUT,
-        max_retry_per_stt=BILINGUAL_STT_RETRIES,
-        retry_interval=BILINGUAL_STT_RETRY_INTERVAL,
-    )
-
-
-def _env_seconds(env: Mapping[str, str], key: str, default: float) -> float:
-    try:
-        value = float(env.get(key) or default)
-    except ValueError:
-        logger.warning("ignoring %s=%r; using %s", key, env.get(key), default)
-        return default
-    return value if value > 0 else default
-
-
-def _turn_handling(profile: str, env: Mapping[str, str]) -> dict:
-    if profile == "legacy":
-        return {"endpointing": {"max_delay": MAX_END_OF_TURN_WAIT}}
-    return {
-        "turn_detection": inference.TurnDetector(
-            unlikely_threshold=_env_seconds(env, "VOICE_EOT_THRESHOLD", BILINGUAL_EOT_THRESHOLD)
-        ),
-        "endpointing": {
-            "mode": BILINGUAL_ENDPOINTING_MODE,
-            "min_delay": _env_seconds(env, "VOICE_MIN_DELAY", BILINGUAL_MIN_END_OF_TURN_WAIT),
-            "max_delay": _env_seconds(env, "VOICE_MAX_DELAY", BILINGUAL_MAX_END_OF_TURN_WAIT),
-        },
-        "interruption": {
-            "resume_false_interruption": BILINGUAL_RESUME_FALSE_INTERRUPTION,
-            "false_interruption_timeout": BILINGUAL_FALSE_INTERRUPTION_TIMEOUT,
-        },
-    }
-
-
-def session_options(profile: str, env: Mapping[str, str]) -> dict:
-    """Build AgentSession options and expose its switchable Cartesia TTS."""
-    selected_profile = _profile_name(profile)
-    if profile not in {"legacy", "bilingual", ""}:
-        logger.warning("unknown voice profile %r; using legacy", profile)
-    logger.info("voice profile: %s", selected_profile)
-
-    primary_tts = _primary_cartesia_tts(selected_profile, env)
-    options = {
-        "stt": _voice_stt(selected_profile, env),
-        "tts": agents_tts.FallbackAdapter(
-            [
-                primary_tts,
-                openai.TTS(voice=FALLBACK_TTS_VOICE),
-            ]
-        ),
-        "llm": openai.LLM(model=VOICE_MODEL),
-        "turn_handling": _turn_handling(selected_profile, env),
-        "primary_tts": primary_tts,
-    }
-    if selected_profile == "bilingual":
-        options["transcription_timeout"] = _env_seconds(
-            env, "VOICE_TRANSCRIPTION_TIMEOUT", BILINGUAL_TRANSCRIPTION_TIMEOUT
-        )
-    return options
+VOICE_PROMPT = assistant.BASE_RULES + get("voice_style").text
 
 
 def build_cards_payload(items: list[dict], timing: dict, turn_id: str) -> dict:
@@ -209,45 +62,6 @@ def build_cards_payload(items: list[dict], timing: dict, turn_id: str) -> dict:
         },
         "turn_id": turn_id,
     }
-
-
-def _step(kind: str, label: str, seconds: float, cache: str | None = None, tool: str | None = None) -> dict:
-    return {"kind": kind, "label": label, "ms": round(seconds * 1000, 1), "cache": cache, "tool": tool}
-
-
-def build_voice_trace(user_metrics: dict, reply_metrics: dict, lookups: list[dict]) -> dict | None:
-    """The x-ray of one spoken turn, in the same shape as a typed turn's trace.
-
-    user_metrics / reply_metrics are the MetricsReport dicts LiveKit attaches to the
-    shopper's and the agent's ChatMessage (seconds and epoch timestamps). lookups
-    are the searches the agent ran this turn: {"tool", "started_at", "timing"}.
-    The total is LiveKit's measured e2e_latency: from the shopper going quiet to the
-    agent's first sound. The steps are the sequential pieces of that wait.
-    """
-    e2e = reply_metrics.get("e2e_latency")
-    if e2e is None:
-        return None
-    steps = []
-    end_of_turn = user_metrics.get("end_of_turn_delay")
-    if end_of_turn is not None:
-        steps.append(_step("listen", "Notice you've finished", end_of_turn))
-    stopped_at = user_metrics.get("stopped_speaking_at")
-    if lookups and stopped_at is not None:
-        # The model's first call runs from the committed turn to the first search.
-        deciding = lookups[0]["started_at"] - (stopped_at + (end_of_turn or 0.0))
-        if deciding > 0:
-            steps.append(_step("llm", "Decide what to look up", deciding))
-    for lookup in lookups:
-        timing = lookup["timing"]
-        steps.append(_step("embed", "Understand the question", timing["embed_ms"] / 1000,
-                           cache=timing["cache"], tool=lookup["tool"]))
-        steps.append(_step("search", SEARCH_LABELS[lookup["tool"]], timing["search_ms"] / 1000,
-                           tool=lookup["tool"]))
-    if (first_word := reply_metrics.get("llm_node_ttft")) is not None:
-        steps.append(_step("llm", "Write the answer", first_word))
-    if (first_sound := reply_metrics.get("tts_node_ttfb")) is not None:
-        steps.append(_step("speak", "Start speaking", first_sound))
-    return {"steps": steps, "total_ms": round(e2e * 1000, 1), "spoken": True}
 
 
 async def _search_products(query: str) -> tuple[str, list[dict], dict]:
@@ -309,7 +123,7 @@ class StoreAgent(Agent):
         env: Mapping[str, str] | None = None,
     ) -> None:
         super().__init__(instructions=VOICE_PROMPT)
-        self.profile = _profile_name(profile)
+        self.profile = voice_config._profile_name(profile)
         self.primary_tts = primary_tts
         self.voice_env = dict(env or {})
         self.reply_language = "en"
@@ -382,7 +196,7 @@ class StoreAgent(Agent):
         return text
 
     async def on_enter(self) -> None:
-        self.session.say("Hi, I'm the store assistant. What are you looking for?")
+        self.session.say(message("greeting", "en"))
 
 
 def prewarm(proc: JobProcess) -> None:
@@ -394,7 +208,7 @@ def prewarm(proc: JobProcess) -> None:
 async def _say_goodbye_after_limit(session: AgentSession, ctx: JobContext) -> None:
     await asyncio.sleep(SESSION_LIMIT_SECONDS)
     try:
-        await session.say("That's all the time I have today. Goodbye!")
+        await session.say(message("goodbye", "en"))
     except Exception:
         logger.warning("could not say the goodbye message", exc_info=True)
     finally:
@@ -403,8 +217,8 @@ async def _say_goodbye_after_limit(session: AgentSession, ctx: JobContext) -> No
 
 async def entrypoint(ctx: JobContext) -> None:
     await ctx.connect()
-    profile = _profile_name(os.environ.get("VOICE_PROFILE", ""))
-    options = session_options(os.environ.get("VOICE_PROFILE", ""), os.environ)
+    profile = voice_config._profile_name(os.environ.get("VOICE_PROFILE", ""))
+    options = voice_config.session_options(os.environ.get("VOICE_PROFILE", ""), os.environ)
     primary_tts = options.pop("primary_tts")
     session = AgentSession(vad=ctx.proc.userdata["vad"], **options)
     agent = StoreAgent(profile=profile, primary_tts=primary_tts, env=os.environ)
@@ -417,9 +231,9 @@ async def entrypoint(ctx: JobContext) -> None:
         def _on_transcription_timeout(_event) -> None:
             try:
                 if agent.reply_language == "ar":
-                    session.say("معلش، مسمعتكش كويس. ممكن تقول تاني؟")
+                    session.say(message("didnt_catch", "ar"))
                 else:
-                    session.say("Sorry, I didn't catch that. Could you say it again?")
+                    session.say(message("didnt_catch", "en"))
             except Exception:
                 logger.exception("could not ask the shopper to repeat after transcription timeout")
 

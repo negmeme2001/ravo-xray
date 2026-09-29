@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from ravo_core import assistant, tools
+from ravo_core import prompts
 from voicetest.outcome import score_turn, summarize_runs
 from voicetest.scoring import arabic_ratio
 
@@ -109,6 +110,8 @@ def main() -> None:
     report["runs"][args.label] = {
         "generated_at": datetime.now(UTC).isoformat(),
         "git_commit": git_commit(),
+        "prompts": prompts.active_versions(),
+        "prompt_set": prompts.prompt_set(),
         "agent": "typed",
         "reps": args.reps,
         "clips": {},

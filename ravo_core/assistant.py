@@ -5,48 +5,14 @@ import logging
 
 from ravo_core import db, tools, understanding
 from ravo_core.db import get_openai_client
+from ravo_core.models import TYPED_CHAT_MODEL
+from ravo_core.prompts import active_versions, get, message, prompt_set, render
 
-MODEL = "gpt-4.1-mini"
+MODEL = TYPED_CHAT_MODEL
 logger = logging.getLogger(__name__)
 MAX_LLM_CALLS = 3
 
-BASE_RULES = (
-    "You are the in-store assistant at a supermarket kiosk. Answer in 2 to 4 short "
-    "sentences. Reply in the language of the shopper's latest message, including when "
-    "you ask them to clarify: an English message gets an English reply, an Arabic one "
-    "an Egyptian Arabic reply (English product names are fine inside it). Always write "
-    "search queries in English, translating "
-    "the shopper's words (for example, 'لبن شوفان' means 'oat milk'), because the catalog "
-    "and documents are in English. Spoken messages may write English words in Arabic "
-    "letters: read 'هيديك' as 'headache' and 'لابتوب' as 'laptop'. For every clear shopping question, including broad "
-    "ones like 'a healthy snack for my kids' or 'something for a cold', call "
-    "search_products first and recommend only products it returns. Never suggest items "
-    "from general knowledge that the search did not return, and never ask permission to "
-    "search: just search. Look for a request anywhere in the message first: when one is "
-    "mixed with unrelated words, like 'banana table do you have milk' (the request is "
-    "milk), search for it and answer it; if two readings are plausible, confirm first. "
-    "Only when there is no request at all (random words, gibberish, or a sentence cut off "
-    "before the request, like 'do you have the') do not search and do not guess: ask one "
-    "short question in the shopper's language that offers two examples, a product like "
-    "milk or medicine, or a question about returns or delivery. If you already asked the "
-    "shopper to clarify in your previous turn and the message is still unclear, suggest "
-    "they tap one of the example questions or type it instead of asking the same question "
-    "again. "
-    "Use search_documents for store policies, returns, opening hours, delivery, "
-    "parking, payment and staff safety. Never invent products, prices or policies. "
-    "Recommend a product only if it is what the shopper asked for or clearly meets "
-    "the same need, like frozen fish when asked for fresh fish. If the search returns "
-    "nothing that does, say plainly that the store doesn't sell it and mention what "
-    "the store does carry (bakery, beverages, cleaning, dairy, frozen food, household, "
-    "pain relief and snacks) by those department names only, never naming a product or "
-    "kind of item from the search results, and suggest no product: an item that only "
-    "shares a word or a loose link with the request, like a lunch box for someone asking "
-    "for a microwave or a cooler bag for someone asking for a laptop, is not an "
-    "alternative. "
-    "Prices are in EGP. Product cards are shown to the shopper separately, so mention "
-    "at most the one or two best matches by name and price instead of listing "
-    "everything. When answering from a document, say which document it comes from."
-)
+BASE_RULES = get("shopper_rules").text
 
 SYSTEM_PROMPT = BASE_RULES
 
@@ -109,10 +75,7 @@ MAX_CITATIONS = 3
 # A card at or above this similarity is a sure match; below it, a card shows
 # only when the reply names the product.
 CONFIDENT_MATCH = 0.45
-WEAK_MATCH_NOTE = (
-    "None of these is a close match. If none is what the shopper asked for, the "
-    "store doesn't sell it: say so and suggest no product."
-)
+WEAK_MATCH_NOTE = message("weak_match_note", "en")
 # Only cite passages nearly as relevant as the best one; weaker ones are noise
 # (a staff-safety passage under a delivery answer, for example).
 CITATION_SIMILARITY_MARGIN = 0.08
@@ -150,21 +113,11 @@ def language_instruction(text: str) -> str:
     Left to the prompt alone, the model answered English and gibberish input in Arabic
     (the store is Egyptian), so the code states the language for every turn.
     """
-    if understanding.script_language(text) == "ar":
-        return "The shopper's latest message is in Arabic: reply in Egyptian Arabic."
-    return "The shopper's latest message is in English: reply in English."
+    return message("language_instruction", understanding.script_language(text))
 
 
-RELEVANCE_PROMPT = (
-    "A supermarket shopper asked for: {query!r}. The catalog search returned only weak "
-    "matches:\n{names}\nWhich of these would a helpful shop assistant offer for that request? "
-    "Keep items that are what was asked for, do the same job, or treat the same symptom "
-    "(frozen fish for fresh fish, a cold and flu medicine for a fever). Drop only items with "
-    "no practical link, that merely share a word or a loose association (a cooler bag for a "
-    'laptop, trash bags for car tyres). Answer with JSON: {{"matches": [exact names]}}, an '
-    "empty list if none."
-)
-NOTHING_SOLD = "Nothing in the catalog meets this request: the store doesn't sell it."
+RELEVANCE_PROMPT = get("relevance_check").text
+NOTHING_SOLD = message("nothing_sold", "en")
 
 
 def keep_relevant(query: str, items: list[dict]) -> tuple[list[dict], float | None]:
@@ -183,7 +136,12 @@ def keep_relevant(query: str, items: list[dict]) -> tuple[list[dict], float | No
         try:
             response = get_openai_client().chat.completions.create(
                 model=MODEL,
-                messages=[{"role": "user", "content": RELEVANCE_PROMPT.format(query=query, names=names)}],
+                messages=[
+                    {
+                        "role": "user",
+                        "content": render("relevance_check", query=query, names=names),
+                    }
+                ],
                 response_format={"type": "json_object"},
                 temperature=0,
                 max_tokens=150,
@@ -354,6 +312,8 @@ def run_turn(messages: list[dict]) -> dict:
             "trace": {
                 "steps": [_llm_step("Check the question", elapsed)],
                 "total_ms": elapsed,
+                "prompts": active_versions(),
+                "prompt_set": prompt_set(),
             },
         }
 
@@ -407,5 +367,10 @@ def run_turn(messages: list[dict]) -> dict:
         "reply": reply,
         "cards": cards_to_show(list(cards.values()), reply)[:MAX_CARDS],
         "citations": _relevant_citations(citations),
-        "trace": {"steps": steps, "total_ms": round(total.ms, 1)},
+        "trace": {
+            "steps": steps,
+            "total_ms": round(total.ms, 1),
+            "prompts": active_versions(),
+            "prompt_set": prompt_set(),
+        },
     }

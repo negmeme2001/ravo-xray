@@ -1,0 +1,30 @@
+[prompts.shopper_rules]
+active = "v1"
+variables = []
+
+[prompts.shopper_rules.versions.v1]
+file = "shopper_rules.v1.md"
+note = "Shopper rules as of commit ae1a440: bilingual replies, English search queries, clarification ladder, not-sold answers."
+
+[prompts.voice_style]
+active = "v1"
+variables = []
+
+[prompts.voice_style.versions.v1]
+file = "voice_style.v1.md"
+note = "Voice style as of commit ae1a440: short spoken sentences, prices said with the currency, Arabic prices in words."
+
+[prompts.relevance_check]
+active = "v1"
+variables = ["query", "names"]
+
+[prompts.relevance_check.versions.v1]
+file = "relevance_check.v1.md"
+note = "Relevance check as of commit ae1a440: keep substitutes, drop items that only share a word."
+
+[messages]
+active = "v1"
+
+[messages.versions.v1]
+file = "messages.v1.toml"
+note = "Canned lines as of commit ae1a440: greeting, goodbye, didn't catch, clarification, model notes."

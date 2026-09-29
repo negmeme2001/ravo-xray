@@ -6,7 +6,9 @@ import pytest
 pytest.importorskip("livekit.agents")
 
 import ravo_core.tools as tools
+from agent import config as agent_config
 from agent import main as agent
+from agent import trace as agent_trace
 from livekit.agents import llm as agents_llm
 from ravo_core import assistant
 
@@ -48,18 +50,18 @@ class _FakeFallback:
 
 @pytest.fixture
 def fake_voice_backends(monkeypatch):
-    monkeypatch.setattr(agent.inference, "STT", _FakeModel)
-    monkeypatch.setattr(agent.inference, "TTS", _FakeModel)
-    monkeypatch.setattr(agent.inference, "TurnDetector", _FakeModel)
-    monkeypatch.setattr(agent.agents_stt, "FallbackAdapter", _FakeFallback)
-    monkeypatch.setattr(agent.agents_tts, "FallbackAdapter", _FakeFallback)
-    monkeypatch.setattr(agent.openai, "TTS", _FakeModel)
-    monkeypatch.setattr(agent.openai, "STT", _FakeModel)
-    monkeypatch.setattr(agent.openai, "LLM", _FakeModel)
+    monkeypatch.setattr(agent_config.inference, "STT", _FakeModel)
+    monkeypatch.setattr(agent_config.inference, "TTS", _FakeModel)
+    monkeypatch.setattr(agent_config.inference, "TurnDetector", _FakeModel)
+    monkeypatch.setattr(agent_config.agents_stt, "FallbackAdapter", _FakeFallback)
+    monkeypatch.setattr(agent_config.agents_tts, "FallbackAdapter", _FakeFallback)
+    monkeypatch.setattr(agent_config.openai, "TTS", _FakeModel)
+    monkeypatch.setattr(agent_config.openai, "STT", _FakeModel)
+    monkeypatch.setattr(agent_config.openai, "LLM", _FakeModel)
 
 
 def test_legacy_session_options_match_existing_configuration(fake_voice_backends):
-    options = agent.session_options("legacy", {})
+    options = agent_config.session_options("legacy", {})
 
     assert options["stt"].options["model"] == "deepgram/flux-general-en"
     assert options["stt"].options["language"] == "en"
@@ -69,14 +71,14 @@ def test_legacy_session_options_match_existing_configuration(fake_voice_backends
 
 
 def test_unknown_session_profile_uses_legacy(fake_voice_backends):
-    options = agent.session_options("unknown", {})
+    options = agent_config.session_options("unknown", {})
 
     assert options["stt"].options["model"] == "deepgram/flux-general-en"
     assert options["turn_handling"] == {"endpointing": {"max_delay": 1.2}}
 
 
 def test_bilingual_session_options_and_environment_overrides(fake_voice_backends):
-    options = agent.session_options(
+    options = agent_config.session_options(
         "bilingual",
         {
             "VOICE_STT_MODEL": "custom/stt",
@@ -104,7 +106,7 @@ def test_bilingual_session_options_and_environment_overrides(fake_voice_backends
 
 
 def test_bilingual_session_options_use_default_stt(fake_voice_backends):
-    options = agent.session_options("bilingual", {})
+    options = agent_config.session_options("bilingual", {})
 
     # OpenAI's live transcriber, told to expect Arabic and English together.
     assert options["stt"].models[0].options["model"] == "gpt-live-transcribe"
@@ -357,7 +359,7 @@ def test_voice_trace_for_a_search_turn():
                 "timing": {"embed_ms": 3.0, "cache": "hit", "search_ms": 6.5}}]
     reply = {"llm_node_ttft": 0.8, "tts_node_ttfb": 0.25, "e2e_latency": 2.6}
 
-    trace = agent.build_voice_trace(_USER, reply, lookups)
+    trace = agent_trace.build_voice_trace(_USER, reply, lookups)
 
     assert [(s["kind"], s["label"]) for s in trace["steps"]] == [
         ("listen", "Notice you've finished"),
@@ -374,7 +376,11 @@ def test_voice_trace_for_a_search_turn():
 
 
 def test_voice_trace_for_a_direct_answer():
-    trace = agent.build_voice_trace(_USER, {"llm_node_ttft": 0.7, "tts_node_ttfb": 0.2, "e2e_latency": 1.4}, [])
+    trace = agent_trace.build_voice_trace(
+        _USER,
+        {"llm_node_ttft": 0.7, "tts_node_ttfb": 0.2, "e2e_latency": 1.4},
+        [],
+    )
 
     assert [s["label"] for s in trace["steps"]] == ["Notice you've finished", "Write the answer", "Start speaking"]
 
@@ -384,14 +390,14 @@ def test_voice_trace_skips_a_negative_decide_step():
     lookups = [{"tool": "search_documents", "started_at": 100.2,
                 "timing": {"embed_ms": 1.0, "cache": "miss", "search_ms": 2.0}}]
 
-    trace = agent.build_voice_trace(_USER, {"e2e_latency": 1.0}, lookups)
+    trace = agent_trace.build_voice_trace(_USER, {"e2e_latency": 1.0}, lookups)
 
     assert "Decide what to look up" not in [s["label"] for s in trace["steps"]]
     assert "Search documents" in [s["label"] for s in trace["steps"]]
 
 
 def test_no_voice_trace_without_measured_latency():
-    assert agent.build_voice_trace(_USER, {"llm_node_ttft": 0.5}, []) is None
+    assert agent_trace.build_voice_trace(_USER, {"llm_node_ttft": 0.5}, []) is None
 
 
 def test_publish_trace_records_monitor_id(monkeypatch):
@@ -449,7 +455,7 @@ def test_publish_trace_skips_the_monitor_in_test_rooms(monkeypatch):
 
 
 def test_pause_settings_can_be_tuned_from_the_environment(fake_voice_backends):
-    options = agent.session_options(
+    options = agent_config.session_options(
         "bilingual",
         {"VOICE_MIN_DELAY": "0.9", "VOICE_MAX_DELAY": "7", "VOICE_TRANSCRIPTION_TIMEOUT": "10",
          "VOICE_EOT_THRESHOLD": "0.5"},
@@ -463,14 +469,20 @@ def test_pause_settings_can_be_tuned_from_the_environment(fake_voice_backends):
 
 
 def test_bad_pause_settings_fall_back_to_the_defaults(fake_voice_backends):
-    options = agent.session_options("bilingual", {"VOICE_MAX_DELAY": "soon", "VOICE_MIN_DELAY": "0"})
+    options = agent_config.session_options(
+        "bilingual",
+        {"VOICE_MAX_DELAY": "soon", "VOICE_MIN_DELAY": "0"},
+    )
 
     assert options["turn_handling"]["endpointing"]["max_delay"] == 4.5
     assert options["turn_handling"]["endpointing"]["min_delay"] == 0.5
 
 
 def test_backup_speech_model_can_be_overridden(fake_voice_backends):
-    options = agent.session_options("bilingual", {"VOICE_STT_BACKUP_MODEL": "speechmatics/enhanced"})
+    options = agent_config.session_options(
+        "bilingual",
+        {"VOICE_STT_BACKUP_MODEL": "speechmatics/enhanced"},
+    )
 
     assert [m.options["model"] for m in options["stt"].models] == [
         "gpt-live-transcribe", "speechmatics/enhanced", "deepgram/flux-general-en",
@@ -478,7 +490,7 @@ def test_backup_speech_model_can_be_overridden(fake_voice_backends):
 
 
 def test_openai_transcriber_languages_come_from_the_environment(fake_voice_backends):
-    options = agent.session_options(
+    options = agent_config.session_options(
         "bilingual", {"VOICE_STT_MODEL": "openai/gpt-4o-transcribe", "VOICE_STT_LANGUAGE": "ar"}
     )
 

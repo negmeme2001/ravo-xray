@@ -10,7 +10,9 @@ import time
 import psycopg
 from pgvector.psycopg import register_vector
 
-EMBED_MODEL = "text-embedding-3-small"
+from ravo_core.models import EMBEDDING_MODEL
+
+EMBED_MODEL = EMBEDDING_MODEL
 EMBED_DIM = 1536
 
 _client = None

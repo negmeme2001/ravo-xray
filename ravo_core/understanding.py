@@ -2,6 +2,8 @@
 
 import unicodedata
 
+from ravo_core.prompts import message
+
 EMPTY = "empty"
 FILLER_ONLY = "filler_only"
 PASS = "pass"
@@ -78,9 +80,4 @@ def script_language(text: str) -> str:
 
 def clarification(language: str) -> str:
     """Return the canned clarification question for a detected language."""
-    if language == "ar":
-        return "معلش، مفهمتش قصدك. بتدور على منتج زي اللبن أو الدوا، ولا عندك سؤال عن الترجيع أو التوصيل؟"
-    return (
-        "Sorry, I didn't catch that. Are you looking for a product, like milk or medicine, "
-        "or asking about returns or delivery?"
-    )
+    return message("clarification", language)

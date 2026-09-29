@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 
 
 def summarize(trace: dict) -> dict:
-    """Reduce a trace to its timing numbers and cache state, dropping all text."""
+    """Keep timing, cache, and prompt-set labels from a trace while dropping text."""
     totals = {"llm": 0.0, "embed": 0.0, "search": 0.0, "listen": 0.0, "speak": 0.0}
     first_cache = None
     for step in trace.get("steps", []):
@@ -37,6 +37,7 @@ def summarize(trace: dict) -> dict:
         "speak_ms": round(totals["speak"], 1),
         "cache": first_cache,
         "spoken": bool(trace.get("spoken")),
+        "prompt_set": trace.get("prompt_set"),
     }
 
 

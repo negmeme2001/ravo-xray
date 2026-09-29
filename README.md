@@ -33,6 +33,8 @@ remaining lever is the language model: one call instead of two, and streaming th
 ```
 Browser ─► FastAPI on Vercel (fra1) ─► ravo_core
                                         ├─ assistant.py   tool-calling loop (gpt-4.1-mini) + trace
+                                        ├─ models.py      shared model IDs
+                                        ├─ prompts/       versioned prompts, messages and manifest
                                         ├─ tools.py       search_products / search_documents (pgvector, HNSW, ef_search=80)
                                         ├─ embed_cache.py query-embedding cache (Upstash Redis, 30-day TTL)
                                         ├─ monitor.py     live monitor: each answer's timings (no text) in Redis

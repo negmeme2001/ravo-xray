@@ -11,6 +11,18 @@ A hosted demo: a conversational retail store assistant (FastAPI on Vercel) whose
 - OpenAI: embeddings `text-embedding-3-small` (1536-dim), chat `gpt-4.1-mini`.
 - Shared logic lives in the `ravo_core/` package; `app.py` and the future voice agent both import it.
 
+## Layout
+- `ravo_core/prompts/` holds versioned model prompts, canned shopper messages, and their manifest.
+- `ravo_core/models.py` is the single source of model IDs.
+- `agent/config.py` owns voice profiles and backend options; `agent/trace.py` builds spoken traces;
+  `agent/main.py` owns the LiveKit agent and entrypoint.
+
+## Prompt rules
+- To change a prompt, add its `name.vN+1` file, bump the active version in `manifest.toml`, add a
+  one-line version note, and keep every older version.
+- Re-run `uv run python -m voicetest.run_typed`; the orchestrator runs this typed suite because it
+  calls real APIs.
+
 ## Gates (run all before finishing; all must pass)
 ```
 uv sync
