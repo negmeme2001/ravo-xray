@@ -50,6 +50,8 @@ STT_KEYWORDS = [
 BILINGUAL_STT_ATTEMPT_TIMEOUT = 3.0
 BILINGUAL_STT_RETRIES = 3
 BILINGUAL_STT_RETRY_INTERVAL = 0.5
+FILLER_DELAY = 0.7
+FILLER_RETRY_INTERVAL = 0.2
 
 logger = logging.getLogger(__name__)
 
@@ -106,6 +108,16 @@ def _env_seconds(env: Mapping[str, str], key: str, default: float) -> float:
         logger.warning("ignoring %s=%r; using %s", key, env.get(key), default)
         return default
     return seconds if seconds > 0 else default
+
+
+def filler_enabled(profile: str, env: Mapping[str, str]) -> bool:
+    """Return whether delayed search filler is enabled for this profile."""
+    return _profile_name(profile) == "bilingual" and env.get("VOICE_FILLER", "1") != "0"
+
+
+def filler_delay(env: Mapping[str, str]) -> float:
+    """Return the configured idle delay before search filler may play."""
+    return _env_seconds(env, "VOICE_FILLER_DELAY", FILLER_DELAY)
 
 
 def _turn_handling(profile: str, env: Mapping[str, str]) -> dict:

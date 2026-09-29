@@ -195,7 +195,9 @@ function renderFilm(film, trace, number) {
   const steps = trace.steps || [];
   const totalMs = trace.total_ms || 0;
   film.querySelector(".marker").textContent = "T" + number;
-  film.querySelector(".total").textContent = formatDuration(totalMs);
+  const firstSound = firstSoundLabel(trace);
+  film.querySelector(".total").textContent = formatDuration(totalMs) +
+    (firstSound ? " · " + firstSound : "");
 
   const exposure = film.querySelector(".exposure");
   const readings = film.querySelector(".readings");
@@ -301,6 +303,8 @@ function addTurn({ kind, trace, messageNode, monitorId, language }) {
   if (kind === "spoken" && label !== "English") chipParts.push(label);
   if (!hasSearch && !hasCards) chipParts.push("asked to clarify");
   chipParts.push(formatDuration(trace.total_ms || 0));
+  const firstSound = firstSoundLabel(trace);
+  if (firstSound) chipParts.push(firstSound);
   chip.querySelector(".chip-text").textContent = chipParts.join(" · ");
   chip.hidden = false;
   chip.addEventListener("click", () => activateTurn(id, { scroll: true }));
@@ -1060,6 +1064,13 @@ function markAssistantPresent() {
 function formatDuration(ms) {
   if (ms == null) return "–";
   return ms >= 1000 ? (ms / 1000).toFixed(1) + " s" : Math.round(ms) + " ms";
+}
+
+function firstSoundLabel(trace) {
+  const firstSoundMs = trace.first_sound_ms;
+  return Number.isFinite(firstSoundMs) && firstSoundMs < trace.total_ms
+    ? "first sound " + (firstSoundMs / 1000).toFixed(1) + " s"
+    : "";
 }
 
 function noteMyAnswer(id, number) {

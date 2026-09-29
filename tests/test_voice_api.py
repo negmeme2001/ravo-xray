@@ -118,6 +118,15 @@ def test_voice_token_returns_jwt_with_room_and_agent(client, voice_env):
     assert claims["roomConfig"]["agents"] == [{"agentName": "ravo-xray"}]
 
 
+def test_voice_token_uses_configured_agent_name(client, voice_env, monkeypatch):
+    monkeypatch.setattr(app_module, "VOICE_AGENT_NAME", "ravo-xray-preview")
+    _login(client)
+
+    claims = _decode_payload(client.post("/api/voice/token").json()["token"])
+
+    assert claims["roomConfig"]["agents"] == [{"agentName": "ravo-xray-preview"}]
+
+
 def test_voice_token_rate_limited_per_ip(client, voice_env):
     _login(client)
     for _ in range(app_module.VOICE_PER_IP_LIMIT):

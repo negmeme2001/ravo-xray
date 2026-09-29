@@ -28,6 +28,9 @@ def build_voice_trace(
     user_metrics: dict,
     reply_metrics: dict,
     lookups: list[dict],
+    *,
+    first_sound_at: float | None = None,
+    filler: bool = False,
 ) -> dict | None:
     """Build the typed-trace shape from one spoken turn's LiveKit metrics."""
     e2e = reply_metrics.get("e2e_latency")
@@ -65,9 +68,14 @@ def build_voice_trace(
         steps.append(_step("llm", "Write the answer", first_word))
     if (first_sound := reply_metrics.get("tts_node_ttfb")) is not None:
         steps.append(_step("speak", "Start speaking", first_sound))
+    first_sound_ms = None
+    if first_sound_at is not None and stopped_at is not None:
+        first_sound_ms = round((first_sound_at - stopped_at) * 1000, 1)
     return {
         "steps": steps,
         "total_ms": round(e2e * 1000, 1),
+        "first_sound_ms": first_sound_ms,
+        "filler": filler,
         "spoken": True,
         "prompts": active_versions(),
         "prompt_set": prompt_set(),

@@ -38,7 +38,7 @@ CHAT_PER_IP_LIMIT = 150
 VOICE_ROOM_TTL_MINUTES = 10
 VOICE_PER_IP_LIMIT = 40
 VOICE_PER_IP_WINDOW_SECONDS = 3600
-VOICE_AGENT_NAME = "ravo-xray"
+VOICE_AGENT_NAME = os.getenv("VOICE_AGENT_NAME", "ravo-xray")
 
 logger = logging.getLogger(__name__)
 

@@ -1,5 +1,6 @@
 import asyncio
 import types
+from contextlib import asynccontextmanager
 
 import pytest
 
@@ -136,6 +137,16 @@ def _store_with_session(profile="bilingual", env=None):
     return store, primary_tts, spoken
 
 
+class _FakeFillerContext:
+    def __init__(self):
+        self.calls = []
+
+    @asynccontextmanager
+    async def with_filler(self, source, **options):
+        self.calls.append((source, options))
+        yield
+
+
 def test_bilingual_filler_asks_for_arabic_clarification():
     store, primary_tts, spoken = _store_with_session()
 
@@ -248,6 +259,78 @@ def test_legacy_turn_hook_is_a_noop():
     assert spoken == []
 
 
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [("Do you have milk?", "One sec, let me check."), ("عندكم لبن؟", "لحظة أشوفلك.")],
+)
+def test_search_filler_waits_for_commit_and_fires_once(text, expected):
+    store, _, _ = _store_with_session()
+    calls = []
+    handle = object()
+
+    def say(message_text, **options):
+        calls.append((message_text, options))
+        return handle
+
+    store._activity.session.say = say
+
+    assert store._search_filler(0) is None
+    asyncio.run(
+        store.on_user_turn_completed(
+            agents_llm.ChatContext(),
+            types.SimpleNamespace(text_content=text),
+        )
+    )
+    assert store._search_filler(0) is handle
+    assert store._search_filler(1) is None
+    assert calls == [(expected, {"add_to_chat_ctx": False})]
+
+
+@pytest.mark.parametrize(
+    ("profile", "env"),
+    [("bilingual", {"VOICE_FILLER": "0"}), ("legacy", {})],
+)
+def test_search_filler_can_be_disabled(profile, env):
+    store, _, _ = _store_with_session(profile=profile, env=env)
+    store.turn_committed = True
+
+    assert store.filler_enabled is False
+    assert store._search_filler(0) is None
+
+
+def test_reply_item_trace_clears_filler_turn_state():
+    store, _, _ = _store_with_session()
+    store.turn_committed = True
+    store.first_sound_at = 101.2
+    store.filler_played = True
+    store.turn_lookups = []
+
+    trace = agent._finish_turn_trace(
+        store,
+        {"stopped_speaking_at": 100.0},
+        {"e2e_latency": 2.0},
+    )
+
+    assert trace["first_sound_ms"] == 1200.0
+    assert trace["filler"] is True
+    assert store.turn_committed is False
+    assert store.first_sound_at is None
+    assert store.filler_played is False
+    assert store.turn_lookups == []
+
+
+def test_first_sound_is_recorded_once_after_commit():
+    store, _, _ = _store_with_session()
+
+    store._record_first_sound(100.5)
+    assert store.first_sound_at is None
+    store.turn_committed = True
+    store._record_first_sound(101.1)
+    store._record_first_sound(101.8)
+
+    assert store.first_sound_at == 101.1
+
+
 def test_search_products_text_uses_render_products(monkeypatch):
     monkeypatch.setattr(
         tools,
@@ -331,7 +414,7 @@ def _install_search_tool(monkeypatch, items):
 def test_search_products_with_only_weak_matches_sends_no_cards(monkeypatch):
     store, sent, _ = _install_search_tool(monkeypatch, _WEAK_ITEMS)
 
-    text = asyncio.run(store.search_products("laptop"))
+    text = asyncio.run(store.search_products(types.SimpleNamespace(), "laptop"))
 
     assert text == assistant.render_products(_WEAK_ITEMS)
     assert sent == []
@@ -342,13 +425,34 @@ def test_search_products_sends_cards_when_a_match_is_confident(monkeypatch):
     store, sent, timing = _install_search_tool(monkeypatch, _CONFIDENT_ITEMS)
     store.turn_id = "turn-456"
 
-    asyncio.run(store.search_products("milk"))
+    asyncio.run(store.search_products(types.SimpleNamespace(), "milk"))
 
     assert sent == [
         (
             agent.CARDS_TOPIC,
             agent.build_cards_payload(_CONFIDENT_ITEMS, timing, "turn-456"),
         )
+    ]
+
+
+def test_search_tools_wrap_only_the_search_await_with_filler(monkeypatch):
+    store, _, _ = _store_with_session(env={"VOICE_FILLER_DELAY": "0.9"})
+    context = _FakeFillerContext()
+
+    async def fake_products(query):
+        return "products", [], {"embed_ms": 1.0, "cache": "hit", "search_ms": 2.0}
+
+    async def fake_documents(query):
+        return "documents", {"embed_ms": 1.0, "cache": "hit", "search_ms": 2.0}
+
+    monkeypatch.setattr(agent, "_search_products", fake_products)
+    monkeypatch.setattr(agent, "_search_documents", fake_documents)
+
+    assert asyncio.run(store.search_products(context, "milk")) == "products"
+    assert asyncio.run(store.search_documents(context, "returns")) == "documents"
+    assert [options for _, options in context.calls] == [
+        {"delay": 0.9, "interval": 0.2, "max_steps": 1},
+        {"delay": 0.9, "interval": 0.2, "max_steps": 1},
     ]
 
 _USER = {"stopped_speaking_at": 100.0, "end_of_turn_delay": 0.4}
@@ -359,7 +463,13 @@ def test_voice_trace_for_a_search_turn():
                 "timing": {"embed_ms": 3.0, "cache": "hit", "search_ms": 6.5}}]
     reply = {"llm_node_ttft": 0.8, "tts_node_ttfb": 0.25, "e2e_latency": 2.6}
 
-    trace = agent_trace.build_voice_trace(_USER, reply, lookups)
+    trace = agent_trace.build_voice_trace(
+        _USER,
+        reply,
+        lookups,
+        first_sound_at=100.85,
+        filler=True,
+    )
 
     assert [(s["kind"], s["label"]) for s in trace["steps"]] == [
         ("listen", "Notice you've finished"),
@@ -372,6 +482,8 @@ def test_voice_trace_for_a_search_turn():
     assert [s["ms"] for s in trace["steps"]] == [400.0, 900.0, 3.0, 6.5, 800.0, 250.0]
     assert trace["steps"][2]["cache"] == "hit"
     assert trace["total_ms"] == 2600.0
+    assert trace["first_sound_ms"] == 850.0
+    assert trace["filler"] is True
     assert trace["spoken"] is True
 
 
@@ -383,6 +495,8 @@ def test_voice_trace_for_a_direct_answer():
     )
 
     assert [s["label"] for s in trace["steps"]] == ["Notice you've finished", "Write the answer", "Start speaking"]
+    assert trace["first_sound_ms"] is None
+    assert trace["filler"] is False
 
 
 def test_voice_trace_skips_a_negative_decide_step():

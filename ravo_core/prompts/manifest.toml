@@ -23,8 +23,12 @@ file = "relevance_check.v1.md"
 note = "Relevance check as of commit ae1a440: keep substitutes, drop items that only share a word."
 
 [messages]
-active = "v1"
+active = "v2"
 
 [messages.versions.v1]
 file = "messages.v1.toml"
 note = "Canned lines as of commit ae1a440: greeting, goodbye, didn't catch, clarification, model notes."
+
+[messages.versions.v2]
+file = "messages.v2.toml"
+note = "Adds delayed search filler in English and Egyptian Arabic."

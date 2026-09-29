@@ -1,0 +1,27 @@
+[shopper.greeting]
+en = "Hi, I'm the store assistant. What are you looking for?"
+
+[shopper.goodbye]
+en = "That's all the time I have today. Goodbye!"
+
+[shopper.didnt_catch]
+ar = "معلش، مسمعتكش كويس. ممكن تقول تاني؟"
+en = "Sorry, I didn't catch that. Could you say it again?"
+
+[shopper.clarification]
+ar = "معلش، مفهمتش قصدك. بتدور على منتج زي اللبن أو الدوا، ولا عندك سؤال عن الترجيع أو التوصيل؟"
+en = "Sorry, I didn't catch that. Are you looking for a product, like milk or medicine, or asking about returns or delivery?"
+
+[shopper.filler]
+ar = "لحظة أشوفلك."
+en = "One sec, let me check."
+
+[model.nothing_sold]
+en = "Nothing in the catalog meets this request: the store doesn't sell it."
+
+[model.weak_match_note]
+en = "None of these is a close match. If none is what the shopper asked for, the store doesn't sell it: say so and suggest no product."
+
+[model.language_instruction]
+ar = "The shopper's latest message is in Arabic: reply in Egyptian Arabic."
+en = "The shopper's latest message is in English: reply in English."

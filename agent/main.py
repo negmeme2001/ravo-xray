@@ -5,7 +5,8 @@ import json
 import logging
 import os
 import time
-from collections.abc import Mapping
+from collections.abc import AsyncIterator, Mapping
+from contextlib import asynccontextmanager
 from uuid import uuid4
 
 from livekit.agents import (
@@ -13,6 +14,7 @@ from livekit.agents import (
     AgentSession,
     JobContext,
     JobProcess,
+    RunContext,
     StopResponse,
     WorkerOptions,
     cli,
@@ -20,6 +22,7 @@ from livekit.agents import (
 )
 from livekit.agents import llm as agents_llm
 from livekit.agents import tts as agents_tts
+from livekit.agents.voice import SpeechHandle
 from livekit.plugins import silero
 
 from agent import config as voice_config
@@ -108,6 +111,22 @@ async def _publish_trace(session: AgentSession, trace: dict) -> None:
     await _send_json(session, TRACE_TOPIC, trace)
 
 
+def _finish_turn_trace(
+    agent: "StoreAgent",
+    user_metrics: dict,
+    reply_metrics: dict,
+) -> dict | None:
+    trace = build_voice_trace(
+        user_metrics,
+        reply_metrics,
+        agent.turn_lookups,
+        first_sound_at=agent.first_sound_at,
+        filler=agent.filler_played,
+    )
+    agent._clear_turn()
+    return trace
+
+
 def _latest_user_text(chat_ctx: agents_llm.ChatContext) -> str:
     for item in reversed(chat_ctx.items):
         if getattr(item, "type", None) == "message" and item.role == "user":
@@ -129,13 +148,52 @@ class StoreAgent(Agent):
         self.reply_language = "en"
         self.turn_id = ""
         self.turn_lookups: list[dict] = []
+        self.turn_committed = False
+        self.first_sound_at: float | None = None
+        self.filler_played = False
+        self.filler_enabled = voice_config.filler_enabled(self.profile, self.voice_env)
+        self.filler_delay = voice_config.filler_delay(self.voice_env)
 
+    def _search_filler(self, _step: int) -> SpeechHandle | None:
+        if not self.filler_enabled or not self.turn_committed or self.filler_played:
+            return None
+        self.filler_played = True
+        return self.session.say(
+            message("filler", self.reply_language),
+            add_to_chat_ctx=False,
+        )
+
+    @asynccontextmanager
+    async def _search_filler_context(self, context: RunContext) -> AsyncIterator[None]:
+        if not self.filler_enabled:
+            yield
+            return
+        async with context.with_filler(
+            self._search_filler,
+            delay=self.filler_delay,
+            interval=voice_config.FILLER_RETRY_INTERVAL,
+            max_steps=1,
+        ):
+            yield
+
+    def _record_first_sound(self, created_at: float) -> None:
+        if self.turn_committed and self.first_sound_at is None:
+            self.first_sound_at = created_at
+
+    def _clear_turn(self) -> None:
+        self.turn_lookups = []
+        self.turn_committed = False
+        self.first_sound_at = None
+        self.filler_played = False
 
     async def on_user_turn_completed(
         self,
         turn_ctx: agents_llm.ChatContext,
         new_message: agents_llm.ChatMessage,
     ) -> None:
+        self.turn_committed = True
+        self.first_sound_at = None
+        self.filler_played = False
         if self.profile != "bilingual":
             return
 
@@ -174,10 +232,11 @@ class StoreAgent(Agent):
             yield chunk
 
     @function_tool
-    async def search_products(self, query: str) -> str:
+    async def search_products(self, context: RunContext, query: str) -> str:
         """Search the store catalog for products, prices and stock levels."""
         started_at = time.time()
-        text, items, timing = await _search_products(query)
+        async with self._search_filler_context(context):
+            text, items, timing = await _search_products(query)
         self.turn_lookups.append({"tool": "search_products", "started_at": started_at, "timing": timing})
         if any(item["similarity"] >= assistant.CONFIDENT_MATCH for item in items):
             await _send_json(
@@ -188,10 +247,11 @@ class StoreAgent(Agent):
         return text
 
     @function_tool
-    async def search_documents(self, query: str) -> str:
+    async def search_documents(self, context: RunContext, query: str) -> str:
         """Search store documents for policies, returns, hours and delivery."""
         started_at = time.time()
-        text, timing = await _search_documents(query)
+        async with self._search_filler_context(context):
+            text, timing = await _search_documents(query)
         self.turn_lookups.append({"tool": "search_documents", "started_at": started_at, "timing": timing})
         return text
 
@@ -237,6 +297,11 @@ async def entrypoint(ctx: JobContext) -> None:
             except Exception:
                 logger.exception("could not ask the shopper to repeat after transcription timeout")
 
+    @session.on("agent_state_changed")
+    def _on_agent_state_changed(event) -> None:
+        if event.new_state == "speaking":
+            agent._record_first_sound(event.created_at)
+
     @session.on("conversation_item_added")
     def _on_item(event) -> None:
         try:
@@ -249,9 +314,12 @@ async def entrypoint(ctx: JobContext) -> None:
                 turn["user_metrics"] = dict(item.metrics)
             elif item.role == "assistant" and turn["user_metrics"] is not None:
                 # Replies with no shopper turn before them (the greeting) get no x-ray.
-                trace = build_voice_trace(turn["user_metrics"], dict(item.metrics), agent.turn_lookups)
+                trace = _finish_turn_trace(
+                    agent,
+                    turn["user_metrics"],
+                    dict(item.metrics),
+                )
                 turn["user_metrics"] = None
-                agent.turn_lookups = []
                 if trace is not None:
                     if profile == "bilingual":
                         trace["turn_id"] = agent.turn_id

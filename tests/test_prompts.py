@@ -52,6 +52,19 @@ def test_v1_messages_match_snapshot(
         assert prompts.message(key, language) == value
 
 
+def test_messages_v2_adds_bilingual_filler_without_changing_v1() -> None:
+    prompt_dir = Path(prompts.__file__).parent
+    v1 = prompts._load_messages(prompt_dir / "messages.v1.toml")
+    v2 = prompts._load_messages(prompt_dir / "messages.v2.toml")
+
+    assert v2["filler"] == {
+        "ar": "لحظة أشوفلك.",
+        "en": "One sec, let me check.",
+    }
+    assert {key: value for key, value in v2.items() if key != "filler"} == v1
+    assert prompts.active_versions()["messages"] == "v2"
+
+
 def _write_catalog(
     tmp_path: Path,
     template: str,

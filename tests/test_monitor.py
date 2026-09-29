@@ -23,6 +23,8 @@ SPOKEN_TRACE = {
         {"kind": "speak", "label": "Start speaking", "ms": 250.0, "cache": None, "tool": None},
     ],
     "total_ms": 2600.0,
+    "first_sound_ms": 850.0,
+    "filler": True,
     "spoken": True,
     "prompt_set": "abc12345",
 }
@@ -73,7 +75,7 @@ def test_summarize_typed_trace():
     assert set(entry) == {
         "id", "at", "total_ms", "llm_ms", "embed_ms", "search_ms",
         "listen_ms", "speak_ms", "cache", "spoken",
-        "prompt_set",
+        "prompt_set", "first_sound_ms", "filler",
     }
     assert len(entry["id"]) == 12
     assert entry["total_ms"] == 950.0
@@ -84,6 +86,8 @@ def test_summarize_typed_trace():
     assert entry["speak_ms"] == 0.0
     assert entry["cache"] == "miss"
     assert entry["spoken"] is False
+    assert entry["first_sound_ms"] is None
+    assert entry["filler"] is False
     assert entry["prompt_set"] == "abc12345"
     assert "label" not in entry
 
@@ -98,6 +102,8 @@ def test_summarize_spoken_trace():
     assert entry["search_ms"] == 0.0
     assert entry["cache"] is None
     assert entry["spoken"] is True
+    assert entry["first_sound_ms"] == 850.0
+    assert entry["filler"] is True
 
 
 def test_record_and_recent_roundtrip():

@@ -30,6 +30,8 @@ def summarize(trace: dict) -> dict:
         "id": uuid.uuid4().hex[:12],
         "at": int(time.time()),
         "total_ms": trace["total_ms"],
+        "first_sound_ms": trace.get("first_sound_ms"),
+        "filler": bool(trace.get("filler")),
         "llm_ms": round(totals["llm"], 1),
         "embed_ms": round(totals["embed"], 1),
         "search_ms": round(totals["search"], 1),
