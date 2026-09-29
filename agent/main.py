@@ -427,8 +427,9 @@ async def entrypoint(ctx: JobContext) -> None:
             if getattr(item, "type", None) != "message":
                 return
             if item.role == "user":
+                # Lookups are not cleared here: the reply is drafted (and its searches run)
+                # before the shopper's turn is committed, so clearing now dropped them.
                 turn["user_metrics"] = dict(item.metrics)
-                agent.turn_lookups = []
             elif item.role == "assistant" and turn["user_metrics"] is not None:
                 # Replies with no shopper turn before them (the greeting) get no x-ray.
                 trace = build_voice_trace(turn["user_metrics"], dict(item.metrics), agent.turn_lookups)
