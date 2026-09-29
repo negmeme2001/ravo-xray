@@ -1,7 +1,9 @@
 import math
 from array import array
+from types import SimpleNamespace
 
 import ravo_core.embed_cache as ec
+from ravo_core import db, usage
 from ravo_core.db import EMBED_MODEL
 
 
@@ -81,3 +83,26 @@ def test_redis_credentials_accept_vercel_marketplace_names(monkeypatch):
     monkeypatch.setenv("KV_REST_API_URL", "https://example.upstash.io")
     monkeypatch.setenv("KV_REST_API_TOKEN", "token")
     assert embed_cache._redis_credentials() == ("https://example.upstash.io", "token")
+
+
+def test_embedding_tokens_are_collected_on_miss_but_not_hit(monkeypatch):
+    redis = FakeRedis()
+    monkeypatch.setattr(ec, "get_redis", lambda: redis)
+
+    class FakeEmbeddings:
+        def create(self, model, input):
+            return SimpleNamespace(
+                data=[SimpleNamespace(embedding=[1.0, 2.0])],
+                usage=SimpleNamespace(prompt_tokens=4),
+            )
+
+    monkeypatch.setattr(db, "_openai_client", lambda: SimpleNamespace(embeddings=FakeEmbeddings()))
+    collector = usage.TurnUsage()
+    with usage.collecting(collector):
+        ec.embed_cached("milk")
+        ec.embed_cached("milk")
+
+    assert collector.units_by_model[db.EMBED_MODEL] == {
+        "requests": 1,
+        "embed_tokens": 4,
+    }

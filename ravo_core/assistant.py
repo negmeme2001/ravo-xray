@@ -3,7 +3,7 @@
 import json
 import logging
 
-from ravo_core import db, tools, understanding
+from ravo_core import db, pricing, tools, understanding, usage
 from ravo_core.db import get_openai_client
 from ravo_core.models import TYPED_CHAT_MODEL
 from ravo_core.prompts import active_versions, get, message, prompt_set, render
@@ -146,9 +146,15 @@ def keep_relevant(query: str, items: list[dict]) -> tuple[list[dict], float | No
                 temperature=0,
                 max_tokens=150,
             )
+            collector = usage.current()
+            if collector is not None:
+                collector.merge(usage.from_chat_usage(MODEL, getattr(response, "usage", None)))
             wanted = set(json.loads(response.choices[0].message.content or "{}").get("matches", []))
         except Exception:
             logger.warning("relevance check failed; keeping the weak matches", exc_info=True)
+            collector = usage.current()
+            if collector is not None:
+                collector.add_flag("relevance_fail_open")
             wanted = {item["name"] for item in items}
     return [item for item in items if item["name"] in wanted], round(t.ms, 1)
 
@@ -248,7 +254,13 @@ def _relevant_citations(citations: list[dict]) -> list[dict]:
     return sorted(kept, key=lambda c: c["similarity"], reverse=True)[:MAX_CITATIONS]
 
 
-def _execute_tool(call, steps: list[dict], cards: dict, citations: list[dict]) -> str:
+def _execute_tool(
+    call,
+    steps: list[dict],
+    cards: dict,
+    citations: list[dict],
+    lookup: dict[str, bool],
+) -> str:
     name = call.function.name
     try:
         args = json.loads(call.function.arguments or "{}")
@@ -258,6 +270,7 @@ def _execute_tool(call, steps: list[dict], cards: dict, citations: list[dict]) -
         return "Tool error: arguments must be a JSON object"
 
     if name == "search_products":
+        lookup["made"] = True
         result = tools.search_products(
             str(args.get("query", "")),
             k=SEARCH_CANDIDATES,
@@ -271,28 +284,49 @@ def _execute_tool(call, steps: list[dict], cards: dict, citations: list[dict]) -
             _tool_step("embed", "Understand the question", result["timing"]["embed_ms"], result["timing"]["cache"], name)
         )
         steps.append(_tool_step("search", "Search products", result["timing"]["search_ms"], None, name))
+        collector = usage.current()
+        if collector is not None:
+            collector.record_cache(result["timing"].get("cache"))
         items, check_ms = keep_relevant(str(args.get("query", "")), result["items"])
         if check_ms is not None:
             steps.append(_llm_step("Check the matches", check_ms))
         result = {**result, "items": items}
         if check_ms is not None and not items:
+            lookup["not_sold"] = True
             return NOTHING_SOLD
+        if items:
+            lookup["found"] = True
         _collect_cards(result["items"], cards)
         return render_products(result["items"])
 
     if name == "search_documents":
+        lookup["made"] = True
         result = tools.search_documents(str(args.get("query", "")))
         steps.append(
             _tool_step("embed", "Understand the question", result["timing"]["embed_ms"], result["timing"]["cache"], name)
         )
         steps.append(_tool_step("search", "Search documents", result["timing"]["search_ms"], None, name))
+        collector = usage.current()
+        if collector is not None:
+            collector.record_cache(result["timing"].get("cache"))
+        if result["items"]:
+            lookup["found"] = True
         _collect_citations(result["items"], citations)
         return render_documents(result["items"])
 
     return f"Tool error: unknown tool {name}"
 
 
-def run_turn(messages: list[dict]) -> dict:
+def _trace_fields(collector: usage.TurnUsage, outcome: str) -> dict:
+    estimated = pricing.estimate(collector.units_by_model)
+    return {
+        **collector.trace_fields(),
+        "est_cost_usd": round(estimated["total_usd"], 6),
+        "outcome": outcome,
+    }
+
+
+def _run_turn(messages: list[dict], collector: usage.TurnUsage) -> dict:
     user_text = next(
         (
             str(message.get("content") or "")
@@ -314,6 +348,7 @@ def run_turn(messages: list[dict]) -> dict:
                 "total_ms": elapsed,
                 "prompts": active_versions(),
                 "prompt_set": prompt_set(),
+                **_trace_fields(collector, "clarified"),
             },
         }
 
@@ -323,6 +358,7 @@ def run_turn(messages: list[dict]) -> dict:
     steps: list[dict] = []
     cards: dict[str, dict] = {}
     citations: list[dict] = []
+    lookup = {"made": False, "found": False, "not_sold": False}
     calls_made = 0
 
     with db.timer() as total:
@@ -340,6 +376,7 @@ def run_turn(messages: list[dict]) -> dict:
                     temperature=0.3,
                     max_tokens=350,
                 )
+            collector.merge(usage.from_chat_usage(MODEL, getattr(response, "usage", None)))
             llm_ms = round(t.ms, 1)
             calls_made += 1
             message = response.choices[0].message
@@ -355,13 +392,22 @@ def run_turn(messages: list[dict]) -> dict:
                     }
                 )
                 for call in tool_calls:
-                    text = _execute_tool(call, steps, cards, citations)
+                    text = _execute_tool(call, steps, cards, citations, lookup)
                     conversation.append({"role": "tool", "tool_call_id": call.id, "content": text})
                 continue
 
             steps.append(_llm_step("Write the answer", llm_ms))
             reply = message.content or ""
             break
+
+    if lookup["found"]:
+        outcome = "answered"
+    elif lookup["not_sold"]:
+        outcome = "not_sold"
+    elif lookup["made"]:
+        outcome = "answered"
+    else:
+        outcome = "chat"
 
     return {
         "reply": reply,
@@ -372,5 +418,16 @@ def run_turn(messages: list[dict]) -> dict:
             "total_ms": round(total.ms, 1),
             "prompts": active_versions(),
             "prompt_set": prompt_set(),
+            **_trace_fields(collector, outcome),
         },
     }
+
+
+def run_turn(messages: list[dict]) -> dict:
+    """Run one typed turn and return its answer, evidence, trace, usage, and outcome."""
+    collector = usage.current()
+    if collector is not None:
+        return _run_turn(messages, collector)
+    collector = usage.TurnUsage()
+    with usage.collecting(collector):
+        return _run_turn(messages, collector)

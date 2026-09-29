@@ -75,7 +75,7 @@ def test_summarize_typed_trace():
     assert set(entry) == {
         "id", "at", "total_ms", "llm_ms", "embed_ms", "search_ms",
         "listen_ms", "speak_ms", "cache", "spoken",
-        "prompt_set", "first_sound_ms", "filler",
+        "prompt_set", "first_sound_ms", "filler", "est_cost_usd", "outcome",
     }
     assert len(entry["id"]) == 12
     assert entry["total_ms"] == 950.0
@@ -148,6 +148,17 @@ def test_record_returns_none_when_redis_raises():
 def test_recent_empty_when_redis_raises():
     set_redis(BoomRedis())
     assert monitor.recent() == []
+
+
+def test_monitor_key_honors_namespace_at_call_time(monkeypatch):
+    fake = FakeRedis()
+    set_redis(fake)
+    monkeypatch.setenv("REDIS_NAMESPACE", "preview:")
+
+    monitor.record(TYPED_TRACE)
+
+    assert "preview:monitor:turns" in fake.data
+    assert monitor.MONITOR_KEY not in fake.data
 
 
 def _typed(entry_id, total, llm, search, embed, cache):

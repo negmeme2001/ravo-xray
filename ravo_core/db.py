@@ -10,6 +10,7 @@ import time
 import psycopg
 from pgvector.psycopg import register_vector
 
+from ravo_core import usage
 from ravo_core.models import EMBEDDING_MODEL
 
 EMBED_MODEL = EMBEDDING_MODEL
@@ -46,6 +47,9 @@ def connect() -> psycopg.Connection:
 
 def embed_batch(texts: list[str]) -> list[list[float]]:
     resp = _openai_client().embeddings.create(model=EMBED_MODEL, input=texts)
+    collector = usage.current()
+    if collector is not None:
+        collector.merge(usage.from_embedding_usage(EMBED_MODEL, getattr(resp, "usage", None)))
     return [d.embedding for d in resp.data]
 
 

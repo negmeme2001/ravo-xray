@@ -1,4 +1,4 @@
-from ravo_core import assistant, tools
+from ravo_core import assistant, tools, usage
 from voicetest.run_typed import run_scenarios
 
 
@@ -28,3 +28,27 @@ def test_run_scenarios_records_query_language_and_restores_tools(monkeypatch) ->
     assert rows[0]["english_queries"] is False
     assert tools.search_products is original_products
     assert tools.search_documents is original_documents
+
+
+def test_run_scenarios_does_not_record_usage(monkeypatch) -> None:
+    monkeypatch.setattr(
+        usage,
+        "record",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("must not record")),
+    )
+    scenario = {
+        "id": "01",
+        "language": "en",
+        "kind": "clear",
+        "reference": "hello",
+        "keywords": [["hello"]],
+        "expect": {"should_answer": True, "should_clarify": False, "expected_types": []},
+    }
+
+    rows = run_scenarios(
+        [scenario],
+        1,
+        run_turn=lambda messages: {"reply": "hello", "cards": [], "trace": {"steps": []}},
+    )
+
+    assert "error" not in rows[0]

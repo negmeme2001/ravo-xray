@@ -1,5 +1,6 @@
 import ravo_core.tools as tools
 from ravo_core import assistant
+from types import SimpleNamespace
 
 
 class _Function:
@@ -26,8 +27,9 @@ class _Choice:
 
 
 class _Response:
-    def __init__(self, content=None, tool_calls=None):
+    def __init__(self, content=None, tool_calls=None, usage=None):
         self.choices = [_Choice(_Message(content=content, tool_calls=tool_calls))]
+        self.usage = usage
 
 
 class _Completions:
@@ -113,6 +115,8 @@ def test_tool_path_records_steps_and_collects_cards(monkeypatch):
     assert result["citations"] == []
     assert result["reply"] == "Almarai Milk is 25.5 EGP."
     assert result["trace"]["total_ms"] >= sum(step["ms"] for step in result["trace"]["steps"])
+    assert result["trace"]["outcome"] == "answered"
+    assert result["trace"]["cache_misses"] == 1
 
     first_call = client.chat.completions.create_calls[0]
     assert first_call["tool_choice"] == "auto"
@@ -132,6 +136,7 @@ def test_direct_answer_single_llm_step(monkeypatch):
     assert result["cards"] == []
     assert result["citations"] == []
     assert result["reply"] == "We are open until 11 PM."
+    assert result["trace"]["outcome"] == "chat"
     assert client.chat.completions.create_calls[0]["tool_choice"] == "auto"
 
 
@@ -307,6 +312,8 @@ def test_filler_only_returns_arabic_clarification_without_openai(monkeypatch):
             "tool": None,
         }
     ]
+    assert result["trace"]["outcome"] == "clarified"
+    assert result["trace"]["usage"] == {}
 
 
 def test_empty_returns_english_clarification_without_openai(monkeypatch):
@@ -345,6 +352,7 @@ def test_weak_search_results_unnamed_in_reply_yield_no_cards(monkeypatch):
     tool_result = client.chat.completions.create_calls[2]["messages"][-1]["content"]
     assert "Cooler Bag" not in tool_result
     assert "Check the matches" in [step["label"] for step in result["trace"]["steps"]]
+    assert result["trace"]["outcome"] == "not_sold"
 
 
 def _product(name, similarity):
@@ -398,3 +406,39 @@ def test_keep_relevant_keeps_everything_when_the_check_fails(monkeypatch):
     items = [_product("Almarai Mineral Water", 0.295)]
 
     assert assistant.keep_relevant("water", items)[0] == items
+
+
+def test_trace_collects_chat_cached_tokens_and_estimated_cost(monkeypatch):
+    sdk_usage = SimpleNamespace(
+        prompt_tokens=100,
+        completion_tokens=25,
+        prompt_tokens_details=SimpleNamespace(cached_tokens=40),
+    )
+    _install_client(monkeypatch, [_Response(content="Hello", usage=sdk_usage)])
+
+    result = assistant.run_turn([{"role": "user", "content": "hello"}])
+
+    assert result["trace"]["usage"][assistant.MODEL] == {
+        "requests": 1,
+        "in_tokens": 60,
+        "cached_tokens": 40,
+        "out_tokens": 25,
+    }
+    assert result["trace"]["est_cost_usd"] == 0.000068
+
+
+def test_relevance_failure_sets_fail_open_flag(monkeypatch):
+    items = [{"code": "P1", **_product("Almarai Mineral Water", 0.295)}]
+    _search_products(items, monkeypatch)
+    _install_client(
+        monkeypatch,
+        [
+            _Response(tool_calls=[_ToolCall("call-1", "search_products", '{"query": "water"}')]),
+            _Response(content="not json"),
+            _Response(content="Try Almarai Mineral Water."),
+        ],
+    )
+
+    result = assistant.run_turn([{"role": "user", "content": "water"}])
+
+    assert result["trace"]["flags"] == ["relevance_fail_open"]

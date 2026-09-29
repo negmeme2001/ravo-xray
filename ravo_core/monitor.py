@@ -2,6 +2,7 @@
 
 import json
 import logging
+import os
 import statistics
 import time
 import uuid
@@ -13,6 +14,10 @@ MONITOR_KEEP = 200
 MONITOR_SHOWN = 40
 
 logger = logging.getLogger(__name__)
+
+
+def _monitor_key() -> str:
+    return f"{os.environ.get('REDIS_NAMESPACE', '')}{MONITOR_KEY}"
 
 
 def summarize(trace: dict) -> dict:
@@ -40,6 +45,8 @@ def summarize(trace: dict) -> dict:
         "cache": first_cache,
         "spoken": bool(trace.get("spoken")),
         "prompt_set": trace.get("prompt_set"),
+        "est_cost_usd": trace.get("est_cost_usd"),
+        "outcome": trace.get("outcome"),
     }
 
 
@@ -55,8 +62,9 @@ def record(trace: dict) -> str | None:
         return None
     entry = summarize(trace)
     try:
-        client.lpush(MONITOR_KEY, json.dumps(entry))
-        client.ltrim(MONITOR_KEY, 0, MONITOR_KEEP - 1)
+        key = _monitor_key()
+        client.lpush(key, json.dumps(entry))
+        client.ltrim(key, 0, MONITOR_KEEP - 1)
     except Exception:
         logger.warning("monitor: record failed", exc_info=True)
         return None
@@ -74,13 +82,14 @@ def forget(ids) -> int:
         return 0
     removed = 0
     try:
-        for item in client.lrange(MONITOR_KEY, 0, -1) or []:
+        key = _monitor_key()
+        for item in client.lrange(key, 0, -1) or []:
             try:
                 entry_id = json.loads(item).get("id")
             except (TypeError, ValueError, AttributeError):
                 continue
             if entry_id in wanted:
-                removed += client.lrem(MONITOR_KEY, 1, item) or 0
+                removed += client.lrem(key, 1, item) or 0
     except Exception:
         logger.warning("monitor: forget failed", exc_info=True)
     return removed
@@ -93,7 +102,7 @@ def recent(n: int = MONITOR_SHOWN) -> list[dict]:
         logger.warning("monitor: no redis client; no recent turns")
         return []
     try:
-        raw = client.lrange(MONITOR_KEY, 0, n - 1)
+        raw = client.lrange(_monitor_key(), 0, n - 1)
     except Exception:
         logger.warning("monitor: recent failed", exc_info=True)
         return []

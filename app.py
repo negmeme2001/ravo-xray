@@ -9,16 +9,18 @@ import hmac
 import json
 import logging
 import os
+import statistics
 import time
 import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from fastapi import Body, Depends, FastAPI, HTTPException, Request
+from fastapi import Body, Depends, FastAPI, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from livekit.api import AccessToken, RoomAgentDispatch, RoomConfiguration, VideoGrants
 
-from ravo_core import assistant, monitor, tools
+from ravo_core import assistant, monitor, tools, usage
+from ravo_core.prompts import prompt_set
 from ravo_core.embed_cache import get_redis
 from ravo_core.limits import allow
 
@@ -221,16 +223,27 @@ def chat(request: Request, payload: dict = Body(...), _: None = Depends(require_
             },
         )
 
-    try:
-        result = assistant.run_turn(messages)
-    except Exception:
-        logger.warning("assistant.run_turn failed", exc_info=True)
-        raise HTTPException(
-            status_code=502,
-            detail={"error": "The assistant couldn't answer just now. Try again in a moment."},
-        )
+    turn_usage = usage.TurnUsage()
+    with usage.collecting(turn_usage):
+        try:
+            result = assistant.run_turn(messages)
+        except Exception:
+            logger.warning("assistant.run_turn failed", exc_info=True)
+            usage.record("typed", turn_usage, "error", turn_usage.flags, prompt_set())
+            raise HTTPException(
+                status_code=502,
+                detail={"error": "The assistant couldn't answer just now. Try again in a moment."},
+            )
 
     result["monitor_id"] = monitor.record(result["trace"])
+    trace = result["trace"]
+    usage.record(
+        "typed",
+        turn_usage,
+        trace.get("outcome", "chat"),
+        trace.get("flags", turn_usage.flags),
+        trace.get("prompt_set") or prompt_set(),
+    )
     result["turns_left"] = max(0, CONVERSATION_TURN_LIMIT - _conv_count(conv_key))
     return result
 
@@ -242,6 +255,63 @@ def live_monitor(_: None = Depends(require_session)):
         {"turns": turns, "summary": monitor.summary(turns)},
         headers={"Cache-Control": "no-store"},
     )
+
+
+def _percentile(values: list[float], percentile: int) -> float | None:
+    if not values:
+        return None
+    if len(values) == 1:
+        return round(values[0], 1)
+    quantiles = statistics.quantiles(values, n=100, method="inclusive")
+    return round(quantiles[percentile - 1], 1)
+
+
+def _recent_usage(turns: list[dict]) -> tuple[dict, list[dict]]:
+    grouped = {
+        "typed": [turn for turn in turns if not turn.get("spoken")],
+        "spoken": [turn for turn in turns if turn.get("spoken")],
+    }
+    recent = {}
+    p90 = {}
+    for channel, channel_turns in grouped.items():
+        values = [float(turn["total_ms"]) for turn in channel_turns]
+        recent[channel] = {
+            "count": len(values),
+            "p50_total_ms": _percentile(values, 50),
+            "p95_total_ms": _percentile(values, 95),
+        }
+        p90[channel] = _percentile(values, 90)
+    slow_turns = []
+    for turn in reversed(turns):
+        channel = "spoken" if turn.get("spoken") else "typed"
+        threshold = p90[channel]
+        if threshold is None or float(turn["total_ms"]) <= threshold:
+            continue
+        slow_turns.append(
+            {
+                "id": turn.get("id"),
+                "at": turn.get("at"),
+                "total_ms": turn.get("total_ms"),
+                "spoken": bool(turn.get("spoken")),
+                "est_cost_usd": turn.get("est_cost_usd"),
+                "outcome": turn.get("outcome"),
+            }
+        )
+        if len(slow_turns) == 5:
+            break
+    return recent, slow_turns
+
+
+@app.get("/api/usage")
+def usage_report(
+    days: int = Query(default=14, ge=1, le=90),
+    _: None = Depends(require_session),
+):
+    report = usage.read(days)
+    recent, slow_turns = _recent_usage(monitor.recent(monitor.MONITOR_KEEP))
+    report["recent"] = recent
+    report["slow_turns"] = slow_turns
+    return JSONResponse(report, headers={"Cache-Control": "no-store"})
 
 
 @app.get("/api/eval")

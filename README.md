@@ -52,6 +52,12 @@ Browser ─► FastAPI on Vercel (fra1) ─► ravo_core
 - `eval/`: `testset.json` (31 product and 17 document questions with checkable answers),
   `run_eval.py` (scores setups and writes `results.json`), `metrics.py`.
 
+## Usage and cost
+
+Typed turns count model requests and tokens, embedding tokens, cache outcomes, result outcomes, and
+reliability flags in small text-free Redis hashes. Costs are estimates from public list prices as of
+2026-09-29, not billing data; update the versioned rates and sources in `ravo_core/pricing.py`.
+
 ## Run it locally
 
 ```bash

@@ -42,6 +42,26 @@ class FakeRedis:
     def lrange(self, key, start, stop):
         return self.data.get(key, [])[start : stop + 1]
 
+    def hsetnx(self, key, field, value):
+        values = self.data.setdefault(key, {})
+        if field in values:
+            return 0
+        values[field] = value
+        return 1
+
+    def hincrby(self, key, field, value):
+        values = self.data.setdefault(key, {})
+        values[field] = int(values.get(field, 0)) + value
+        return values[field]
+
+    def hincrbyfloat(self, key, field, value):
+        values = self.data.setdefault(key, {})
+        values[field] = float(values.get(field, 0)) + value
+        return values[field]
+
+    def hgetall(self, key):
+        return dict(self.data.get(key, {}))
+
 
 CANNED_RESULT = {
     "reply": "Almarai Milk is 25.5 EGP.",
@@ -283,3 +303,33 @@ def test_chat_turn_adds_monitor_entry(client):
     assert turns[0]["total_ms"] == 0.0
     assert turns[0]["cache"] is None
     assert turns[0]["spoken"] is False
+
+
+def test_usage_requires_session(client):
+    res = client.get("/api/usage")
+    assert res.status_code == 401
+    assert res.json() == {"error": "Enter the access code first."}
+
+
+def test_usage_validates_days_bounds(client):
+    _login(client)
+    assert client.get("/api/usage?days=0").status_code == 422
+    assert client.get("/api/usage?days=91").status_code == 422
+
+
+def test_usage_returns_counters_cost_and_recent_shape(client):
+    _login(client)
+    assert client.post("/api/chat", json=_chat_body()).status_code == 200
+
+    res = client.get("/api/usage?days=2")
+
+    assert res.status_code == 200
+    assert res.headers["cache-control"] == "no-store"
+    body = res.json()
+    assert body["totals"]["typed"] == 1
+    assert len(body["days"]) == 2
+    assert set(body["recent"]) == {"typed", "spoken"}
+    assert body["recent"]["typed"]["count"] == 1
+    assert body["recent"]["spoken"]["count"] == 0
+    assert body["slow_turns"] == []
+    assert body["prices"]["as_of"] == "2026-09-29"
