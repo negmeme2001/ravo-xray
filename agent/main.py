@@ -255,6 +255,9 @@ async def _search_products(query: str) -> tuple[str, list[dict], dict]:
         tools.search_products, query, k=assistant.SEARCH_CANDIDATES
     )
     items = assistant.unique_by_name(result["items"])[:MAX_PRODUCTS_FOR_VOICE]
+    items, check_ms = await asyncio.to_thread(assistant.keep_relevant, query, items)
+    if check_ms is not None and not items:
+        return assistant.NOTHING_SOLD, items, result["timing"]
     return assistant.render_products(items), items, result["timing"]
 
 

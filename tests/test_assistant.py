@@ -332,6 +332,7 @@ def test_weak_search_results_unnamed_in_reply_yield_no_cards(monkeypatch):
         monkeypatch,
         [
             _Response(tool_calls=[_ToolCall("call-1", "search_products", '{"query": "laptop"}')]),
+            _Response(content='{"matches": []}'),
             _Response(content="We don't sell laptops."),
         ],
     )
@@ -340,6 +341,10 @@ def test_weak_search_results_unnamed_in_reply_yield_no_cards(monkeypatch):
 
     assert result["cards"] == []
     assert result["reply"] == "We don't sell laptops."
+    # The model writing the reply never sees the loosely linked products.
+    tool_result = client.chat.completions.create_calls[2]["messages"][-1]["content"]
+    assert "Cooler Bag" not in tool_result
+    assert "Check the matches" in [step["label"] for step in result["trace"]["steps"]]
 
 
 def _product(name, similarity):
@@ -369,3 +374,27 @@ def test_english_and_gibberish_input_are_told_to_get_english_replies(monkeypatch
 
 def test_arabic_input_is_told_to_get_an_arabic_reply(monkeypatch):
     assert "reply in Egyptian Arabic" in _system_prompt_for("عندكم لبن شوفان؟", monkeypatch)
+
+
+def test_keep_relevant_skips_the_check_when_a_result_is_confident(monkeypatch):
+    _reject_client_call(monkeypatch)
+    items = [_product("Domty Oat Milk", 0.68), _product("Beyti Cooler Bag", 0.2)]
+
+    assert assistant.keep_relevant("oat milk", items) == (items, None)
+
+
+def test_keep_relevant_keeps_only_the_named_matches(monkeypatch):
+    _install_client(monkeypatch, [_Response(content='{"matches": ["Almarai Mineral Water"]}')])
+    items = [_product("Almarai Mineral Water", 0.295), _product("Panda Lemonade", 0.25)]
+
+    kept, ms = assistant.keep_relevant("water", items)
+
+    assert [item["name"] for item in kept] == ["Almarai Mineral Water"]
+    assert ms is not None
+
+
+def test_keep_relevant_keeps_everything_when_the_check_fails(monkeypatch):
+    _install_client(monkeypatch, [_Response(content="not json")])
+    items = [_product("Almarai Mineral Water", 0.295)]
+
+    assert assistant.keep_relevant("water", items)[0] == items

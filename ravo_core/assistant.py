@@ -1,11 +1,13 @@
 """Tool-calling store assistant that records an x-ray latency trace per turn."""
 
 import json
+import logging
 
 from ravo_core import db, tools, understanding
 from ravo_core.db import get_openai_client
 
 MODEL = "gpt-4.1-mini"
+logger = logging.getLogger(__name__)
 MAX_LLM_CALLS = 3
 
 BASE_RULES = (
@@ -36,9 +38,11 @@ BASE_RULES = (
     "the same need, like frozen fish when asked for fresh fish. If the search returns "
     "nothing that does, say plainly that the store doesn't sell it and mention what "
     "the store does carry (bakery, beverages, cleaning, dairy, frozen food, household, "
-    "pain relief and snacks), and suggest no product: an item that only shares a word "
-    "or a loose link with the request, like a lunch box for someone asking for a "
-    "microwave, is not an alternative. "
+    "pain relief and snacks) by those department names only, never naming a product or "
+    "kind of item from the search results, and suggest no product: an item that only "
+    "shares a word or a loose link with the request, like a lunch box for someone asking "
+    "for a microwave or a cooler bag for someone asking for a laptop, is not an "
+    "alternative. "
     "Prices are in EGP. Product cards are shown to the shopper separately, so mention "
     "at most the one or two best matches by name and price instead of listing "
     "everything. When answering from a document, say which document it comes from."
@@ -149,6 +153,46 @@ def language_instruction(text: str) -> str:
     if understanding.script_language(text) == "ar":
         return "The shopper's latest message is in Arabic: reply in Egyptian Arabic."
     return "The shopper's latest message is in English: reply in English."
+
+
+RELEVANCE_PROMPT = (
+    "A supermarket shopper asked for: {query!r}. The catalog search returned only weak "
+    "matches:\n{names}\nWhich of these would a helpful shop assistant offer for that request? "
+    "Keep items that are what was asked for, do the same job, or treat the same symptom "
+    "(frozen fish for fresh fish, a cold and flu medicine for a fever). Drop only items with "
+    "no practical link, that merely share a word or a loose association (a cooler bag for a "
+    'laptop, trash bags for car tyres). Answer with JSON: {{"matches": [exact names]}}, an '
+    "empty list if none."
+)
+NOTHING_SOLD = "Nothing in the catalog meets this request: the store doesn't sell it."
+
+
+def keep_relevant(query: str, items: list[dict]) -> tuple[list[dict], float | None]:
+    """Drop weak search results that don't meet the shopper's need; returns (items, ms).
+
+    Only runs when every result is a weak match. No similarity cut-off separates real
+    substitutes from noise ("water" -> mineral water scores 0.295, "phone charger" ->
+    batteries 0.306), and a model shown the noise pitched it (a cooler bag for a laptop)
+    despite the prompt, so a short model check removes it before the reply is written.
+    It fails open: on any error the items are kept as before.
+    """
+    if not items or any(item["similarity"] >= CONFIDENT_MATCH for item in items):
+        return items, None
+    names = "\n".join(f"- {item['name']}" for item in items)
+    with db.timer() as t:
+        try:
+            response = get_openai_client().chat.completions.create(
+                model=MODEL,
+                messages=[{"role": "user", "content": RELEVANCE_PROMPT.format(query=query, names=names)}],
+                response_format={"type": "json_object"},
+                temperature=0,
+                max_tokens=150,
+            )
+            wanted = set(json.loads(response.choices[0].message.content or "{}").get("matches", []))
+        except Exception:
+            logger.warning("relevance check failed; keeping the weak matches", exc_info=True)
+            wanted = {item["name"] for item in items}
+    return [item for item in items if item["name"] in wanted], round(t.ms, 1)
 
 
 def _llm_step(label: str, ms: float) -> dict:
@@ -269,6 +313,12 @@ def _execute_tool(call, steps: list[dict], cards: dict, citations: list[dict]) -
             _tool_step("embed", "Understand the question", result["timing"]["embed_ms"], result["timing"]["cache"], name)
         )
         steps.append(_tool_step("search", "Search products", result["timing"]["search_ms"], None, name))
+        items, check_ms = keep_relevant(str(args.get("query", "")), result["items"])
+        if check_ms is not None:
+            steps.append(_llm_step("Check the matches", check_ms))
+        result = {**result, "items": items}
+        if check_ms is not None and not items:
+            return NOTHING_SOLD
         _collect_cards(result["items"], cards)
         return render_products(result["items"])
 
